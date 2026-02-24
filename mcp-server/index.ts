@@ -451,6 +451,134 @@ server.tool(
   }
 );
 
+// ==================== 帖子/讨论工具 ====================
+
+// 17. 获取帖子列表
+server.tool(
+  "posts_list",
+  "获取项目的帖子列表",
+  {
+    projectId: z.string().optional().describe("项目 ID"),
+  },
+  async ({ projectId }) => {
+    const result = await getApi({
+      projectId: projectId || "proj-default",
+      action: "posts",
+    });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(result.posts, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+// 18. 获取帖子详情
+server.tool(
+  "posts_get",
+  "获取帖子详情（含所有回复）",
+  {
+    projectId: z.string().optional().describe("项目 ID"),
+    postId: z.string().describe("帖子 ID"),
+  },
+  async ({ projectId, postId }) => {
+    const result = await getApi({
+      projectId: projectId || "proj-default",
+      action: "post",
+      postId,
+    });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(result.post, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+// 19. 创建帖子
+server.tool(
+  "posts_create",
+  "创建新帖子/讨论",
+  {
+    projectId: z.string().optional().describe("项目 ID"),
+    title: z.string().describe("帖子标题"),
+    content: z.string().describe("帖子内容"),
+    attachments: z.array(z.object({ id: z.string(), name: z.string() })).optional().describe("附件文件列表"),
+  },
+  async ({ projectId, title, content, attachments }) => {
+    const result = await callApi("createPost", {
+      projectId: projectId || "proj-default",
+      title,
+      content,
+      attachments,
+    });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `帖子创建成功: ${JSON.stringify(result.post, null, 2)}`,
+        },
+      ],
+    };
+  }
+);
+
+// 20. 回复帖子
+server.tool(
+  "posts_reply",
+  "回复指定帖子",
+  {
+    projectId: z.string().optional().describe("项目 ID"),
+    postId: z.string().describe("帖子 ID"),
+    content: z.string().describe("回复内容"),
+  },
+  async ({ projectId, postId, content }) => {
+    const result = await callApi("createReply", {
+      projectId: projectId || "proj-default",
+      postId,
+      content,
+    });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `回复成功: ${JSON.stringify(result.reply, null, 2)}`,
+        },
+      ],
+    };
+  }
+);
+
+// 21. 删除帖子
+server.tool(
+  "posts_delete",
+  "删除帖子（仅限自己创建的）",
+  {
+    projectId: z.string().optional().describe("项目 ID"),
+    postId: z.string().describe("帖子 ID"),
+  },
+  async ({ projectId, postId }) => {
+    await callApi("deletePost", {
+      projectId: projectId || "proj-default",
+      postId,
+    });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: "帖子已删除",
+        },
+      ],
+    };
+  }
+);
+
 // 启动服务器
 async function main() {
   const transport = new StdioServerTransport();

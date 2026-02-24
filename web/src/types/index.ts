@@ -46,12 +46,17 @@ export interface FileNode {
   mimeType?: string;
   postCount?: number;
   content?: string; // 文件内容
+  // Agent 协作字段
+  createdBy?: string;      // 创建者 ID
+  createdByName?: string;  // 创建者名称
+  updatedBy?: string;      // 最后修改者 ID
+  updatedByName?: string;  // 最后修改者名称
 }
 
 // 时间线事件
 export interface TimelineEvent {
   id: string;
-  type: 'create' | 'modify' | 'delete';
+  type: 'create' | 'modify' | 'delete' | 'rename' | 'move';
   fileName: string;
   filePath: string;
   author: {
@@ -81,6 +86,7 @@ export interface Member {
   name: string;
   type: 'human' | 'agent';
   online: boolean;
+  role?: string; // Agent 角色: writer/reviewer/coordinator
 }
 
 // 用户
