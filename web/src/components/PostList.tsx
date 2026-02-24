@@ -7,7 +7,7 @@ import { usePosts } from '@/hooks/usePosts';
 interface Props {
   posts: Post[];
   members: Member[];
-  files: FileNode;
+  files: FileNode | null;
   onSelectPost: (post: Post) => void;
   referencedFiles?: FileNode[];
   onClearReferences?: () => void;
@@ -52,8 +52,8 @@ export default function PostList({ posts, members, files, onSelectPost, referenc
   }, [triggerCompose, referencedFiles]);
 
   const filteredPosts = filterMember
-    ? posts.filter(p => p.author.id === filterMember)
-    : posts;
+    ? (posts || []).filter(p => p.author.id === filterMember)
+    : (posts || []);
 
   const sortedPosts = [...filteredPosts].sort((a, b) => {
     if (a.isPinned && !b.isPinned) return -1;
@@ -61,7 +61,7 @@ export default function PostList({ posts, members, files, onSelectPost, referenc
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
-  const allFiles = flattenFiles(files);
+  const allFiles = files ? flattenFiles(files) : [];
 
   const toggleAttachFile = (file: FileNode) => {
     if (attachedFiles.find(f => f.id === file.id)) {
@@ -151,7 +151,7 @@ export default function PostList({ posts, members, files, onSelectPost, referenc
       {/* Post List */}
       <div className="flex-1 overflow-auto">
         {sortedPosts.map((post) => {
-          const isAgent = post.author.type === 'agent';
+          const isAgent = post.author?.type === 'agent';
 
           return (
             <article
@@ -164,7 +164,7 @@ export default function PostList({ posts, members, files, onSelectPost, referenc
                 isAgent ? 'bg-violet-100' : 'bg-neutral-200'
               }`}>
                 <span className={`text-xs font-semibold ${isAgent ? 'text-violet-600' : 'text-neutral-600'}`}>
-                  {isAgent ? 'AI' : post.author.name[0]}
+                  {isAgent ? 'AI' : (post.author?.name?.[0] || '?')}
                 </span>
               </div>
 

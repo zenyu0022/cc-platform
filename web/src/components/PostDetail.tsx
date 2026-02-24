@@ -32,9 +32,9 @@ export default function PostDetail({ post, onBack, referencedFiles = [], onClear
   const { createReply } = usePosts();
   const [replyContent, setReplyContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [localReplies, setLocalReplies] = useState<Reply[]>(post.replies);
+  const [localReplies, setLocalReplies] = useState<Reply[]>(post.replies || []);
   const replyInputRef = useRef<HTMLInputElement>(null);
-  const isAgent = post.author.type === 'agent';
+  const isAgent = post.author?.type === 'agent';
 
   // 处理引用文件触发回复框聚焦
   useEffect(() => {
@@ -105,13 +105,13 @@ export default function PostDetail({ post, onBack, referencedFiles = [], onClear
               isAgent ? 'bg-violet-100' : 'bg-neutral-200'
             }`}>
               <span className={`text-sm font-semibold ${isAgent ? 'text-violet-600' : 'text-neutral-600'}`}>
-                {isAgent ? 'AI' : post.author.name[0]}
+                {isAgent ? 'AI' : (post.author?.name?.[0] || '?')}
               </span>
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className={`text-sm font-medium ${isAgent ? 'text-violet-700' : 'text-neutral-900'}`}>
-                  {post.author.name}
+                  {post.author?.name || 'Unknown'}
                 </span>
                 {isAgent && (
                   <span className="text-[10px] font-medium text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">AI</span>
@@ -210,7 +210,7 @@ export default function PostDetail({ post, onBack, referencedFiles = [], onClear
 }
 
 function ReplyItem({ reply }: { reply: Reply }) {
-  const isAgent = reply.author.type === 'agent';
+  const isAgent = reply.author?.type === 'agent';
 
   return (
     <div className="px-6 py-4 border-t border-neutral-50 hover:bg-neutral-50/50 transition-colors">
@@ -219,13 +219,13 @@ function ReplyItem({ reply }: { reply: Reply }) {
           isAgent ? 'bg-violet-100' : 'bg-neutral-200'
         }`}>
           <span className={`text-xs font-semibold ${isAgent ? 'text-violet-600' : 'text-neutral-600'}`}>
-            {isAgent ? 'AI' : reply.author.name[0]}
+            {isAgent ? 'AI' : (reply.author?.name?.[0] || '?')}
           </span>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className={`text-sm font-medium ${isAgent ? 'text-violet-700' : 'text-neutral-900'}`}>
-              {reply.author.name}
+              {reply.author?.name || 'Unknown'}
             </span>
             {isAgent && (
               <span className="text-[10px] font-medium text-violet-600 bg-violet-50 px-1 py-0.5 rounded">AI</span>

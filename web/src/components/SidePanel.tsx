@@ -5,7 +5,7 @@ import { FileNode, TimelineEvent, Member } from '@/types';
 import FileTree from './FileTree';
 
 interface Props {
-  tree: FileNode;
+  tree: FileNode | null;
   timeline: TimelineEvent[];
   members: Member[];
   onFileClick: (node: FileNode) => void;
@@ -68,11 +68,11 @@ export default function SidePanel({
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const filteredTimeline = filterMember
-    ? timeline.filter(e => e.author.id === filterMember)
-    : timeline;
+    ? (timeline || []).filter(e => e.author.id === filterMember)
+    : (timeline || []);
 
   const handleFileSelect = async (files: FileList | null) => {
-    if (!files) return;
+    if (!files || !tree) return;
 
     for (const file of Array.from(files)) {
       const reader = new FileReader();
@@ -94,7 +94,7 @@ export default function SidePanel({
 
   // 处理文件夹上传
   const handleFolderSelect = async (files: FileList | null) => {
-    if (!files) return;
+    if (!files || !tree) return;
 
     // 解析文件夹结构
     const folderMap = new Map<string, string>();
@@ -257,7 +257,7 @@ export default function SidePanel({
               >
                 全部
               </button>
-              {members.map((member) => (
+              {(members || []).map((member) => (
                 <button
                   key={member.id}
                   onClick={() => setFilterMember(member.id)}
@@ -276,7 +276,7 @@ export default function SidePanel({
           {/* Timeline */}
           <div className="p-2 space-y-1">
             {filteredTimeline.map((event) => {
-              const isAgent = event.author.type === 'agent';
+              const isAgent = event.author?.type === 'agent';
               return (
                 <div
                   key={event.id}
@@ -297,11 +297,11 @@ export default function SidePanel({
                           isAgent ? 'bg-violet-100' : 'bg-neutral-200'
                         }`}>
                           <span className={`text-[8px] font-semibold ${isAgent ? 'text-violet-600' : 'text-neutral-500'}`}>
-                            {isAgent ? 'AI' : event.author.name[0]}
+                            {isAgent ? 'AI' : (event.author?.name?.[0] || '?')}
                           </span>
                         </div>
                         <span className={`text-[10px] ${isAgent ? 'text-violet-600' : 'text-neutral-400'}`}>
-                          {event.author.name}
+                          {event.author?.name || 'Unknown'}
                         </span>
                       </div>
                     </div>

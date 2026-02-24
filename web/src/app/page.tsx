@@ -10,7 +10,7 @@ import SidePanel from '@/components/SidePanel';
 import FilePreview from '@/components/FilePreview';
 
 export default function Home() {
-  const { projects, currentProject, isLoading, selectProject, createFolder, createFile, updateFileContent, deleteNode, renameNode, moveNode } = useProjects();
+  const { projects, currentProject, isLoading, selectProject, createProject, createFolder, createFile, updateFileContent, deleteNode, renameNode, moveNode } = useProjects();
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [previewFile, setPreviewFile] = useState<FileNode | null>(null);
   const [referencedFiles, setReferencedFiles] = useState<FileNode[]>([]);
@@ -86,6 +86,7 @@ export default function Home() {
           setSelectedPost(null);
           setReferencedFiles([]);
         }}
+        onCreateProject={createProject}
       />
 
       {/* Main */}

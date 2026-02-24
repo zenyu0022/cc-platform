@@ -134,6 +134,39 @@ export const serverDb = {
     return data.currentProjectId;
   },
 
+  async createProject(input: { name: string; description?: string; visibility: 'private' | 'team' | 'public' }, agent?: AgentIdentity) {
+    const data = readData();
+    const id = `proj-${Date.now()}`;
+
+    const project: Project = {
+      id,
+      name: input.name,
+      description: input.description,
+      visibility: input.visibility,
+      fileTree: {
+        id: `root-${generateId()}`,
+        name: 'root',
+        type: 'folder',
+        children: [],
+      },
+      posts: [],
+      timeline: agent ? [{
+        id: `event-${generateId()}`,
+        type: 'create',
+        fileName: input.name,
+        filePath: input.name,
+        author: { id: agent.id, name: agent.name, type: 'agent' },
+        summary: '创建了项目',
+        createdAt: new Date().toISOString(),
+      }] : [],
+      members: agent ? [{ id: agent.id, name: agent.name, type: 'agent', online: true, role: agent.role }] : [],
+    };
+
+    data.projects.push(project);
+    writeData(data);
+    return project;
+  },
+
   // 文件树
   async getFileTree(projectId: string): Promise<FileNode | null> {
     const project = await this.getProject(projectId);
@@ -608,16 +641,19 @@ export const serverDb = {
   },
 
   // 创建帖子
-  async createPost(projectId: string, title: string, content: string, agent: AgentIdentity, attachments?: { id: string; name: string }[]): Promise<{ id: string; title: string }> {
+  async createPost(projectId: string, title: string, content: string, agent: AgentIdentity, attachments?: { id: string; name: string }[]) {
     const data = readData();
     const project = data.projects.find(p => p.id === projectId);
     if (!project) throw new Error('Project not found');
+
+    // 根据 role 判断 author type
+    const authorType = agent.role === 'user' ? 'human' : 'agent';
 
     const post = {
       id: `post-${generateId()}`,
       title,
       content,
-      author: { id: agent.id, name: agent.name, type: 'agent' as const },
+      author: { id: agent.id, name: agent.name, type: authorType as 'human' | 'agent' },
       createdAt: new Date().toISOString(),
       replies: [],
       replyCount: 0,
@@ -643,11 +679,11 @@ export const serverDb = {
     });
 
     writeData(data);
-    return { id: post.id, title: post.title };
+    return post;
   },
 
   // 创建回复
-  async createReply(projectId: string, postId: string, content: string, agent: AgentIdentity): Promise<{ id: string }> {
+  async createReply(projectId: string, postId: string, content: string, agent: AgentIdentity) {
     const data = readData();
     const project = data.projects.find(p => p.id === projectId);
     if (!project) throw new Error('Project not found');
@@ -655,10 +691,13 @@ export const serverDb = {
     const post = project.posts.find(p => p.id === postId);
     if (!post) throw new Error('Post not found');
 
+    // 根据 role 判断 author type
+    const authorType = agent.role === 'user' ? 'human' : 'agent';
+
     const reply = {
       id: `reply-${generateId()}`,
       content,
-      author: { id: agent.id, name: agent.name, type: 'agent' as const },
+      author: { id: agent.id, name: agent.name, type: authorType as 'human' | 'agent' },
       createdAt: new Date().toISOString(),
     };
 
@@ -677,7 +716,7 @@ export const serverDb = {
     });
 
     writeData(data);
-    return { id: reply.id };
+    return reply;
   },
 
   // 删除帖子

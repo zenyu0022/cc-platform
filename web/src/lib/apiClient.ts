@@ -67,6 +67,11 @@ export const apiClient = {
     return result.tree ? { fileTree: result.tree } : null;
   },
 
+  async createProject(input: { name: string; description?: string; visibility: 'private' | 'team' | 'public' }) {
+    const result = await postApi('createProject', input);
+    return result.project;
+  },
+
   // 文件树
   async getFileTree(projectId: string) {
     const result = await getApi({ projectId });

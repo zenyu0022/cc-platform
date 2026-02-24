@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { serverDb } from '@/lib/db/supabaseStorage';
 
 // Agent 身份类型
 interface AgentIdentity {
@@ -8,9 +7,24 @@ interface AgentIdentity {
   role: string;
 }
 
+// 根据环境变量选择存储模式
+const STORAGE_MODE = process.env.STORAGE_MODE || 'local';
+
+// 获取数据库实例（延迟加载）
+async function getDb() {
+  if (STORAGE_MODE === 'supabase') {
+    const { serverDb } = await import('@/lib/db/supabaseStorage');
+    return serverDb;
+  } else {
+    const { serverDb } = await import('@/lib/db/serverStorage');
+    return serverDb;
+  }
+}
+
 // GET /api/files - 获取文件树或文件内容
 export async function GET(request: NextRequest) {
   try {
+    const db = await getDb();
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('projectId');
     const fileId = searchParams.get('fileId');
@@ -18,26 +32,26 @@ export async function GET(request: NextRequest) {
 
     if (!projectId) {
       // 返回项目列表
-      const projects = await serverDb.getProjects();
+      const projects = await db.getProjects();
       return NextResponse.json({ projects });
     }
 
     if (action === 'content' && fileId) {
       // 获取文件内容
-      const result = await serverDb.getFileContent(projectId, fileId);
+      const result = await db.getFileContent(projectId, fileId);
       return NextResponse.json(result);
     }
 
     if (action === 'search') {
       // 搜索文件
       const query = searchParams.get('query') || '';
-      const results = await serverDb.searchFiles(projectId, query);
+      const results = await db.searchFiles(projectId, query);
       return NextResponse.json({ results });
     }
 
     if (action === 'agents') {
       // 获取项目成员
-      const agents = await serverDb.getProjectAgents(projectId);
+      const agents = await db.getProjectAgents(projectId);
       return NextResponse.json({ agents });
     }
 
@@ -45,20 +59,20 @@ export async function GET(request: NextRequest) {
       // 获取消息
       const agentId = searchParams.get('agentId');
       const includeBroadcast = searchParams.get('includeBroadcast') !== 'false';
-      const messages = await serverDb.getMessages(projectId, agentId || undefined, includeBroadcast);
+      const messages = await db.getMessages(projectId, agentId || undefined, includeBroadcast);
       return NextResponse.json({ messages });
     }
 
     if (action === 'timeline') {
       // 获取时间线
       const limit = parseInt(searchParams.get('limit') || '20');
-      const timeline = await serverDb.getTimeline(projectId, limit);
+      const timeline = await db.getTimeline(projectId, limit);
       return NextResponse.json({ timeline });
     }
 
     if (action === 'posts') {
       // 获取帖子列表
-      const posts = await serverDb.getPosts(projectId);
+      const posts = await db.getPosts(projectId);
       return NextResponse.json({ posts });
     }
 
@@ -68,7 +82,7 @@ export async function GET(request: NextRequest) {
       if (!postId) {
         return NextResponse.json({ error: 'postId is required' }, { status: 400 });
       }
-      const post = await serverDb.getPost(projectId, postId);
+      const post = await db.getPost(projectId, postId);
       if (!post) {
         return NextResponse.json({ error: 'Post not found' }, { status: 404 });
       }
@@ -77,15 +91,15 @@ export async function GET(request: NextRequest) {
 
     if (action === 'project') {
       // 获取完整项目数据（用于前端同步）
-      const project = await serverDb.getProject(projectId);
+      const project = await db.getProject(projectId);
       if (!project) {
         return NextResponse.json({ error: 'Project not found' }, { status: 404 });
       }
       const [fileTree, posts, timeline, members] = await Promise.all([
-        serverDb.getFileTree(projectId),
-        serverDb.getPosts(projectId),
-        serverDb.getTimeline(projectId, 50),
-        serverDb.getProjectAgents(projectId),
+        db.getFileTree(projectId),
+        db.getPosts(projectId),
+        db.getTimeline(projectId, 50),
+        db.getProjectAgents(projectId),
       ]);
       return NextResponse.json({
         project: {
@@ -99,7 +113,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 获取文件树
-    const tree = await serverDb.getFileTree(projectId);
+    const tree = await db.getFileTree(projectId);
     return NextResponse.json({ tree });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
@@ -109,9 +123,23 @@ export async function GET(request: NextRequest) {
 // POST /api/files - 创建文件或文件夹
 export async function POST(request: NextRequest) {
   try {
+    const db = await getDb();
     const body = await request.json();
     const { action, projectId, parentId, name, type, content, agent } = body;
     const agentIdentity: AgentIdentity = agent || { id: 'api', name: 'API', role: 'system' };
+
+    // 创建项目不需要 projectId
+    if (action === 'createProject') {
+      const { name: projectName, description, visibility } = body;
+      if (!projectName) {
+        return NextResponse.json({ error: 'name is required' }, { status: 400 });
+      }
+      const project = await db.createProject(
+        { name: projectName, description, visibility: visibility || 'team' },
+        agentIdentity
+      );
+      return NextResponse.json({ success: true, project });
+    }
 
     if (!projectId) {
       return NextResponse.json({ error: 'projectId is required' }, { status: 400 });
@@ -120,29 +148,29 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case 'registerAgent':
         // 注册/更新 Agent
-        await serverDb.registerAgent(projectId, agentIdentity);
+        await db.registerAgent(projectId, agentIdentity);
         return NextResponse.json({ success: true, message: `Agent ${agentIdentity.name} 已注册` });
 
       case 'sendMessage':
         // 发送消息
         const { toAgentId, content: msgContent } = body;
-        await serverDb.sendMessage(projectId, agentIdentity, toAgentId, msgContent);
+        await db.sendMessage(projectId, agentIdentity, toAgentId, msgContent);
         return NextResponse.json({ success: true, message: '消息已发送' });
 
       case 'createFolder':
         if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
-        const folder = await serverDb.createFolder(projectId, parentId || 'root', name, agentIdentity);
+        const folder = await db.createFolder(projectId, parentId || 'root', name, agentIdentity);
         return NextResponse.json({ success: true, folder });
 
       case 'createFile':
         if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
-        const file = await serverDb.createFile(projectId, parentId || 'root', name, content || '', agentIdentity);
+        const file = await db.createFile(projectId, parentId || 'root', name, content || '', agentIdentity);
         return NextResponse.json({ success: true, file });
 
       case 'updateContent':
         const { fileId } = body;
         if (!fileId) return NextResponse.json({ error: 'fileId is required' }, { status: 400 });
-        await serverDb.updateFileContent(projectId, fileId, content || '', agentIdentity);
+        await db.updateFileContent(projectId, fileId, content || '', agentIdentity);
         return NextResponse.json({ success: true });
 
       case 'move':
@@ -150,7 +178,7 @@ export async function POST(request: NextRequest) {
         if (!nodeId || !newParentId) {
           return NextResponse.json({ error: 'nodeId and newParentId are required' }, { status: 400 });
         }
-        await serverDb.moveNode(projectId, nodeId, newParentId, agentIdentity);
+        await db.moveNode(projectId, nodeId, newParentId, agentIdentity);
         return NextResponse.json({ success: true });
 
       case 'rename':
@@ -158,13 +186,13 @@ export async function POST(request: NextRequest) {
         if (!renameNodeId || !newName) {
           return NextResponse.json({ error: 'nodeId and newName are required' }, { status: 400 });
         }
-        await serverDb.renameNode(projectId, renameNodeId, newName, agentIdentity);
+        await db.renameNode(projectId, renameNodeId, newName, agentIdentity);
         return NextResponse.json({ success: true });
 
       case 'delete':
         const { nodeId: deleteNodeId } = body;
         if (!deleteNodeId) return NextResponse.json({ error: 'nodeId is required' }, { status: 400 });
-        await serverDb.deleteNode(projectId, deleteNodeId, agentIdentity);
+        await db.deleteNode(projectId, deleteNodeId, agentIdentity);
         return NextResponse.json({ success: true });
 
       // ==================== 帖子操作 ====================
@@ -173,7 +201,7 @@ export async function POST(request: NextRequest) {
         if (!title || !postContent) {
           return NextResponse.json({ error: 'title and content are required' }, { status: 400 });
         }
-        const newPost = await serverDb.createPost(projectId, title, postContent, agentIdentity, attachments);
+        const newPost = await db.createPost(projectId, title, postContent, agentIdentity, attachments);
         return NextResponse.json({ success: true, post: newPost });
 
       case 'createReply':
@@ -181,7 +209,7 @@ export async function POST(request: NextRequest) {
         if (!postId || !replyContent) {
           return NextResponse.json({ error: 'postId and content are required' }, { status: 400 });
         }
-        const newReply = await serverDb.createReply(projectId, postId, replyContent, agentIdentity);
+        const newReply = await db.createReply(projectId, postId, replyContent, agentIdentity);
         return NextResponse.json({ success: true, reply: newReply });
 
       case 'deletePost':
@@ -189,7 +217,7 @@ export async function POST(request: NextRequest) {
         if (!deletePostId) {
           return NextResponse.json({ error: 'postId is required' }, { status: 400 });
         }
-        await serverDb.deletePost(projectId, deletePostId, agentIdentity);
+        await db.deletePost(projectId, deletePostId, agentIdentity);
         return NextResponse.json({ success: true });
 
       default:

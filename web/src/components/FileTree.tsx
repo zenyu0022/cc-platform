@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { FileNode } from '@/types';
 
 interface Props {
-  tree: FileNode;
+  tree: FileNode | null;
   onFileClick: (node: FileNode) => void;
   onFileReference: (node: FileNode) => void;
   onCreateFolder: (parentId: string, name: string) => void;
@@ -369,6 +369,15 @@ export default function FileTree({
   const [newItemName, setNewItemName] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // tree 为空时不渲染
+  if (!tree) {
+    return (
+      <div className="p-4 text-center text-neutral-400 text-sm">
+        暂无文件
+      </div>
+    );
+  }
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

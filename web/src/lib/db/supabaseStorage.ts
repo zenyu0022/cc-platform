@@ -35,6 +35,36 @@ export const serverDb = {
     return 'proj-default';
   },
 
+  async createProject(input: { name: string; description?: string; visibility: 'private' | 'team' | 'public' }, agent?: AgentIdentity) {
+    const id = `proj-${Date.now()}`;
+    const { data, error } = await supabase
+      .from('projects')
+      .insert({
+        id,
+        name: input.name,
+        description: input.description || '',
+        visibility: input.visibility,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+
+    // 创建根文件夹
+    await supabase
+      .from('file_nodes')
+      .insert({
+        id: `${id}-root`,
+        project_id: id,
+        parent_id: null,
+        name: 'root',
+        type: 'folder',
+        created_by: agent?.id,
+        created_by_name: agent?.name,
+      });
+
+    return data;
+  },
+
   // ==================== 文件树 ====================
 
   async getFileTree(projectId: string) {
@@ -75,9 +105,11 @@ export const serverDb = {
   // ==================== 文件夹操作 ====================
 
   async createFolder(projectId: string, parentId: string | null, name: string, agent?: AgentIdentity) {
+    const id = `folder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const { data, error } = await supabase
       .from('file_nodes')
       .insert({
+        id,
         project_id: projectId,
         parent_id: parentId === 'root' ? null : parentId,
         name,
@@ -100,6 +132,7 @@ export const serverDb = {
   // ==================== 文件操作 ====================
 
   async createFile(projectId: string, parentId: string | null, name: string, content: string = '', agent?: AgentIdentity) {
+    const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const ext = name.split('.').pop()?.toLowerCase() || 'txt';
     const mimeTypes: Record<string, string> = {
       ts: 'text/typescript',
@@ -116,6 +149,7 @@ export const serverDb = {
     const { data, error } = await supabase
       .from('file_nodes')
       .insert({
+        id,
         project_id: projectId,
         parent_id: parentId === 'root' ? null : parentId,
         name,

@@ -88,18 +88,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // 创建项目
   const createProject = useCallback(async (input: { name: string; description?: string; visibility: 'private' | 'team' | 'public' }) => {
-    // TODO: 实现 API 创建项目
-    const project = {
-      id: `proj-${Date.now()}`,
-      ...input,
-      fileTree: { id: 'root', name: 'root', type: 'folder', children: [] },
-      posts: [],
-      timeline: [],
-      members: [],
-    } as Project;
-    setProjects(prev => [...prev, project]);
+    const project = await apiClient.createProject(input);
+    // 刷新项目列表
+    await loadData();
     return project;
-  }, []);
+  }, [loadData]);
 
   // 创建帖子
   const createPost = useCallback(async (input: { title: string; content: string; attachments?: Attachment[]; tags?: string[] }) => {
@@ -136,8 +129,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
           if (p.id === postId) {
             return {
               ...p,
-              replies: [...p.replies, result.reply],
-              replyCount: p.replyCount + 1,
+              replies: [...(p.replies || []), result.reply],
+              replyCount: (p.replyCount || 0) + 1,
             };
           }
           return p;
