@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Post, Reply } from '@/types';
+import { usePosts } from '@/hooks/usePosts';
 
 interface Props {
   post: Post;
@@ -25,8 +26,28 @@ function formatSize(bytes: number) {
 }
 
 export default function PostDetail({ post, onBack }: Props) {
+  const { createReply } = usePosts();
   const [replyContent, setReplyContent] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [localReplies, setLocalReplies] = useState<Reply[]>(post.replies);
   const isAgent = post.author.type === 'agent';
+
+  const handleReply = async () => {
+    if (!replyContent.trim()) return;
+
+    setIsSubmitting(true);
+    try {
+      const reply = await createReply(post.id, replyContent);
+      setLocalReplies(prev => [...prev, reply]);
+      setReplyContent('');
+    } catch (error) {
+      console.error('Failed to create reply:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const allReplies = localReplies;
 
   return (
     <main className="flex-1 flex flex-col bg-white overflow-hidden">
@@ -127,14 +148,14 @@ export default function PostDetail({ post, onBack }: Props) {
             <svg className="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
             </svg>
-            <span className="text-sm font-medium text-neutral-700">{post.replies.length} 回复</span>
+            <span className="text-sm font-medium text-neutral-700">{allReplies.length} 回复</span>
           </div>
 
-          {post.replies.map((reply) => (
+          {allReplies.map((reply) => (
             <ReplyItem key={reply.id} reply={reply} />
           ))}
 
-          {post.replies.length === 0 && (
+          {allReplies.length === 0 && (
             <div className="px-6 py-12 text-center">
               <p className="text-sm text-neutral-400">暂无回复</p>
             </div>
@@ -151,14 +172,16 @@ export default function PostDetail({ post, onBack }: Props) {
           type="text"
           value={replyContent}
           onChange={(e) => setReplyContent(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleReply()}
           placeholder="写下你的回复..."
           className="flex-1 h-9 px-3 text-sm bg-neutral-50 rounded-lg border-0 focus:ring-2 focus:ring-neutral-900/10 focus:bg-white transition-colors placeholder:text-neutral-400"
         />
         <button
+          onClick={handleReply}
           className="h-9 px-4 text-sm font-medium text-white bg-neutral-900 rounded-lg hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          disabled={!replyContent.trim()}
+          disabled={!replyContent.trim() || isSubmitting}
         >
-          发送
+          {isSubmitting ? '发送中...' : '发送'}
         </button>
       </div>
     </main>

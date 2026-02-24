@@ -2,30 +2,44 @@
 
 import { useState } from 'react';
 import { Post, FileNode } from '@/types';
-import { mockProjects, mockCurrentProject } from '@/mock/data';
+import { useProjects } from '@/hooks/useProjects';
 import ProjectNav from '@/components/ProjectNav';
 import PostList from '@/components/PostList';
 import PostDetail from '@/components/PostDetail';
 import SidePanel from '@/components/SidePanel';
 
 export default function Home() {
-  const [currentProjectId, setCurrentProjectId] = useState(mockCurrentProject.id);
+  const { projects, currentProject, isLoading, selectProject } = useProjects();
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-
-  const currentProject = mockProjects.find(p => p.id === currentProjectId) || mockCurrentProject;
 
   const handleFileClick = (node: FileNode) => {
     console.log('引用文件:', node.name);
   };
 
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-neutral-50">
+        <div className="text-neutral-400">加载中...</div>
+      </div>
+    );
+  }
+
+  if (!currentProject) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-neutral-50">
+        <div className="text-neutral-400">暂无项目</div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen flex bg-neutral-50 overflow-hidden">
       {/* Sidebar */}
       <ProjectNav
-        projects={mockProjects}
-        currentProjectId={currentProjectId}
+        projects={projects}
+        currentProjectId={currentProject.id}
         onSelectProject={(id) => {
-          setCurrentProjectId(id);
+          selectProject(id);
           setSelectedPost(null);
         }}
       />

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Post, Member, FileNode } from '@/types';
+import { Post, Member, FileNode, Attachment } from '@/types';
+import { usePosts } from '@/hooks/usePosts';
 
 interface Props {
   posts: Post[];
@@ -30,12 +31,14 @@ function flattenFiles(node: FileNode, result: FileNode[] = []): FileNode[] {
 }
 
 export default function PostList({ posts, members, files, onSelectPost }: Props) {
+  const { createPost } = usePosts();
   const [filterMember, setFilterMember] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<FileNode[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredPosts = filterMember
     ? posts.filter(p => p.author.id === filterMember)
@@ -57,13 +60,28 @@ export default function PostList({ posts, members, files, onSelectPost }: Props)
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!newTitle.trim() || !newContent.trim()) return;
-    console.log({ title: newTitle, content: newContent, attachedFiles });
-    setNewTitle('');
-    setNewContent('');
-    setAttachedFiles([]);
-    setShowCompose(false);
+
+    setIsSubmitting(true);
+    try {
+      const attachments: Attachment[] = attachedFiles.map(f => ({
+        id: f.id,
+        name: f.name,
+        size: f.size || 0,
+        mimeType: f.mimeType || 'application/octet-stream',
+      }));
+
+      await createPost(newTitle, newContent, attachments);
+      setNewTitle('');
+      setNewContent('');
+      setAttachedFiles([]);
+      setShowCompose(false);
+    } catch (error) {
+      console.error('Failed to create post:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -289,10 +307,10 @@ export default function PostList({ posts, members, files, onSelectPost }: Props)
 
                 <button
                   onClick={handleSubmit}
-                  disabled={!newTitle.trim() || !newContent.trim()}
+                  disabled={!newTitle.trim() || !newContent.trim() || isSubmitting}
                   className="h-9 px-4 text-sm font-medium text-white bg-neutral-900 rounded-lg hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  发布
+                  {isSubmitting ? '发布中...' : '发布'}
                 </button>
               </div>
             </div>
