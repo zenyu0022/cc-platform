@@ -1,12 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import { Post, Reply } from '@/types';
+import { useState, useEffect, useRef } from 'react';
+import { Post, Reply, FileNode } from '@/types';
 import { usePosts } from '@/hooks/usePosts';
 
 interface Props {
   post: Post;
   onBack: () => void;
+  referencedFiles?: FileNode[];
+  onClearReferences?: () => void;
+  triggerReplyFocus?: boolean;
 }
 
 function formatTime(dateStr: string) {
@@ -25,12 +28,29 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export default function PostDetail({ post, onBack }: Props) {
+export default function PostDetail({ post, onBack, referencedFiles = [], onClearReferences, triggerReplyFocus }: Props) {
   const { createReply } = usePosts();
   const [replyContent, setReplyContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localReplies, setLocalReplies] = useState<Reply[]>(post.replies);
+  const replyInputRef = useRef<HTMLInputElement>(null);
   const isAgent = post.author.type === 'agent';
+
+  // 处理引用文件触发回复框聚焦
+  useEffect(() => {
+    if (triggerReplyFocus && replyInputRef.current) {
+      replyInputRef.current.focus();
+      // 如果有引用文件，在回复内容中添加提示
+      if (referencedFiles.length > 0) {
+        const fileNames = referencedFiles.map(f => f.name).join('、');
+        setReplyContent(prev => {
+          if (prev.includes(fileNames)) return prev;
+          return prev ? `${prev} ` : `引用文件: ${fileNames} `;
+        });
+        onClearReferences?.();
+      }
+    }
+  }, [triggerReplyFocus, referencedFiles, onClearReferences]);
 
   const handleReply = async () => {
     if (!replyContent.trim()) return;
@@ -169,6 +189,7 @@ export default function PostDetail({ post, onBack }: Props) {
           <span className="text-xs font-semibold text-neutral-600">我</span>
         </div>
         <input
+          ref={replyInputRef}
           type="text"
           value={replyContent}
           onChange={(e) => setReplyContent(e.target.value)}

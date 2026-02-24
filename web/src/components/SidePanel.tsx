@@ -1,80 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { FileNode, TimelineEvent, Member } from '@/types';
+import FileTree from './FileTree';
 
 interface Props {
   tree: FileNode;
   timeline: TimelineEvent[];
   members: Member[];
   onFileClick: (node: FileNode) => void;
-}
-
-function FileIcon({ name, type }: { name: string; type: string }) {
-  if (type === 'folder') {
-    return (
-      <svg className="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M3 7a2 2 0 012-2h4.586a1 1 0 01.707.293l1.414 1.414a1 1 0 00.707.293H19a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-      </svg>
-    );
-  }
-
-  const ext = name.split('.').pop()?.toLowerCase();
-  const colorMap: Record<string, string> = {
-    ts: 'text-blue-500',
-    tsx: 'text-blue-500',
-    js: 'text-yellow-500',
-    json: 'text-yellow-600',
-    md: 'text-neutral-500',
-    pdf: 'text-red-500',
-  };
-  const color = colorMap[ext || ''] || 'text-neutral-400';
-
-  return (
-    <svg className={`w-4 h-4 ${color}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-      <path d="M14 2v6h6" />
-    </svg>
-  );
-}
-
-function TreeNode({ node, onFileClick, level = 0 }: { node: FileNode; onFileClick: (n: FileNode) => void; level?: number }) {
-  const isFolder = node.type === 'folder';
-  const [expanded, setExpanded] = useState(true);
-
-  return (
-    <div>
-      <div
-        className="h-8 flex items-center gap-2 px-2 rounded-md hover:bg-neutral-50 cursor-pointer transition-colors group"
-        style={{ paddingLeft: `${level * 16 + 8}px` }}
-        onClick={() => {
-          if (isFolder) setExpanded(!expanded);
-          else onFileClick(node);
-        }}
-      >
-        {isFolder && (
-          <svg
-            className={`w-3 h-3 text-neutral-300 transition-transform ${expanded ? 'rotate-90' : ''}`}
-            viewBox="0 0 24 24"
-            fill="currentColor"
-          >
-            <path d="M9 5l7 7-7 7z" />
-          </svg>
-        )}
-        {!isFolder && <div className="w-3" />}
-        <FileIcon name={node.name} type={node.type} />
-        <span className="flex-1 text-sm text-neutral-600 truncate">{node.name}</span>
-        {!isFolder && (
-          <button className="opacity-0 group-hover:opacity-100 text-xs text-neutral-400 hover:text-neutral-600 transition-opacity">
-            引用
-          </button>
-        )}
-      </div>
-      {isFolder && expanded && node.children?.map((child) => (
-        <TreeNode key={child.id} node={child} onFileClick={onFileClick} level={level + 1} />
-      ))}
-    </div>
-  );
+  onFileReference: (node: FileNode) => void;
+  onCreateFolder: (parentId: string, name: string) => void;
+  onCreateFile: (parentId: string, name: string, content?: string) => void;
+  onDeleteNode: (nodeId: string) => void;
+  onRenameNode: (nodeId: string, newName: string) => void;
+  onMoveNode: (nodeId: string, newParentId: string) => void;
 }
 
 function formatTime(dateStr: string) {
@@ -109,13 +49,107 @@ function EventIcon({ type }: { type: string }) {
   return icons[type as keyof typeof icons] || icons.modify;
 }
 
-export default function SidePanel({ tree, timeline, members, onFileClick }: Props) {
+export default function SidePanel({
+  tree,
+  timeline,
+  members,
+  onFileClick,
+  onFileReference,
+  onCreateFolder,
+  onCreateFile,
+  onDeleteNode,
+  onRenameNode,
+  onMoveNode,
+}: Props) {
   const [filterMember, setFilterMember] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'files' | 'activity'>('files');
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const filteredTimeline = filterMember
     ? timeline.filter(e => e.author.id === filterMember)
     : timeline;
+
+  const handleFileSelect = async (files: FileList | null) => {
+    if (!files) return;
+
+    for (const file of Array.from(files)) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const content = reader.result as string;
+        // 上传到根目录
+        onCreateFile(tree.id, file.name, content);
+      };
+
+      // 根据文件类型决定读取方式
+      if (file.name.match(/\.(json|js|ts|tsx|jsx|md|txt|html|css|py|go|rs|yaml|yml|xml|sql|sh)$/i)) {
+        reader.readAsText(file);
+      } else {
+        // 二进制文件，存储为 base64
+        reader.readAsDataURL(file);
+      }
+    }
+  };
+
+  // 处理文件夹上传
+  const handleFolderSelect = async (files: FileList | null) => {
+    if (!files) return;
+
+    // 解析文件夹结构
+    const folderMap = new Map<string, string>();
+
+    for (const file of Array.from(files)) {
+      const pathParts = file.webkitRelativePath.split('/');
+      let currentParentId = tree.id;
+
+      // 创建文件夹层级
+      for (let i = 1; i < pathParts.length - 1; i++) {
+        const folderName = pathParts[i];
+        const folderPath = pathParts.slice(0, i + 1).join('/');
+
+        if (!folderMap.has(folderPath)) {
+          // 需要创建文件夹
+          const folderId = `folder-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          folderMap.set(folderPath, folderId);
+          // 由于无法同步等待，这里简化处理
+        }
+
+        const existingFolderId = folderMap.get(folderPath);
+        if (existingFolderId) {
+          currentParentId = existingFolderId;
+        }
+      }
+
+      // 创建文件
+      const reader = new FileReader();
+      reader.onload = () => {
+        const content = reader.result as string;
+        onCreateFile(currentParentId, file.name, content);
+      };
+
+      if (file.name.match(/\.(json|js|ts|tsx|jsx|md|txt|html|css|py|go|rs|yaml|yml|xml|sql|sh)$/i)) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsDataURL(file);
+      }
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    handleFileSelect(e.dataTransfer.files);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragOver(false);
+  };
 
   return (
     <aside className="w-72 h-full bg-white border-l border-neutral-200 flex flex-col">
@@ -140,20 +174,70 @@ export default function SidePanel({ tree, timeline, members, onFileClick }: Prop
       </div>
 
       {activeTab === 'files' && (
-        <div className="flex-1 overflow-auto py-2">
+        <div
+          className="flex-1 overflow-auto py-2"
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+        >
           {/* Upload */}
           <div className="px-4 py-2">
-            <button className="w-full h-9 flex items-center justify-center gap-2 text-sm text-neutral-500 border border-dashed border-neutral-200 rounded-lg hover:border-neutral-300 hover:text-neutral-600 transition-colors">
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
-              </svg>
-              上传
-            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => handleFileSelect(e.target.files)}
+            />
+            <input
+              ref={folderInputRef}
+              type="file"
+              // @ts-expect-error webkitdirectory is not in types
+              webkitdirectory=""
+              directory=""
+              multiple
+              className="hidden"
+              onChange={(e) => handleFolderSelect(e.target.files)}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className={`flex-1 h-9 flex items-center justify-center gap-1.5 text-sm border rounded-lg transition-colors ${
+                  isDragOver
+                    ? 'border-blue-400 text-blue-500 bg-blue-50'
+                    : 'border-dashed border-neutral-200 text-neutral-500 hover:border-neutral-300 hover:text-neutral-600'
+                }`}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                </svg>
+                文件
+              </button>
+              <button
+                onClick={() => folderInputRef.current?.click()}
+                className="flex-1 h-9 flex items-center justify-center gap-1.5 text-sm border border-dashed border-neutral-200 text-neutral-500 hover:border-neutral-300 hover:text-neutral-600 rounded-lg transition-colors"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 7a2 2 0 012-2h4.586a1 1 0 01.707.293l1.414 1.414a1 1 0 00.707.293H19a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                  <path d="M12 11v6M9 14h6" />
+                </svg>
+                文件夹
+              </button>
+            </div>
           </div>
 
           {/* Tree */}
           <div className="px-2">
-            <TreeNode node={tree} onFileClick={onFileClick} />
+            <FileTree
+              tree={tree}
+              onFileClick={onFileClick}
+              onFileReference={onFileReference}
+              onCreateFolder={onCreateFolder}
+              onCreateFile={onCreateFile}
+              onDelete={onDeleteNode}
+              onRename={onRenameNode}
+              onMove={onMoveNode}
+            />
           </div>
         </div>
       )}

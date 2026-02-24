@@ -22,6 +22,14 @@ interface DataContextValue {
   // 回复操作
   createReply: (postId: string, content: string) => Promise<Reply>;
 
+  // 文件操作
+  createFolder: (parentId: string, name: string) => Promise<void>;
+  createFile: (parentId: string, name: string, content?: string) => Promise<void>;
+  updateFileContent: (fileId: string, content: string) => Promise<void>;
+  deleteNode: (nodeId: string) => Promise<void>;
+  renameNode: (nodeId: string, newName: string) => Promise<void>;
+  moveNode: (nodeId: string, newParentId: string) => Promise<void>;
+
   // 其他数据
   members: Member[];
   fileTree: FileNode | null;
@@ -128,6 +136,102 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return reply;
   }, []);
 
+  // 文件操作
+  const createFolder = useCallback(async (parentId: string, name: string) => {
+    if (!currentProject) throw new Error('No project selected');
+    await db.createFolder(currentProject.id, parentId, name);
+
+    // 重新加载文件树
+    const tree = await db.getFileTree(currentProject.id);
+    setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree } : null);
+  }, [currentProject]);
+
+  const createFile = useCallback(async (parentId: string, name: string, content: string = '') => {
+    if (!currentProject) throw new Error('No project selected');
+    await db.createFile(currentProject.id, parentId, name, content);
+
+    // 重新加载文件树和时间线
+    const [tree, timeline] = await Promise.all([
+      db.getFileTree(currentProject.id),
+      db.getTimeline(currentProject.id),
+    ]);
+    setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree, timeline } : null);
+  }, [currentProject]);
+
+  const updateFileContent = useCallback(async (fileId: string, content: string) => {
+    if (!currentProject) throw new Error('No project selected');
+    await db.updateFileContent(currentProject.id, fileId, content);
+
+    // 重新加载文件树和时间线
+    const [tree, timeline] = await Promise.all([
+      db.getFileTree(currentProject.id),
+      db.getTimeline(currentProject.id),
+    ]);
+    setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree, timeline } : null);
+  }, [currentProject]);
+
+  const deleteNode = useCallback(async (nodeId: string) => {
+    if (!currentProject) throw new Error('No project selected');
+    await db.deleteNode(currentProject.id, nodeId);
+
+    // 重新加载文件树
+    const tree = await db.getFileTree(currentProject.id);
+    setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree } : null);
+  }, [currentProject]);
+
+  const renameNode = useCallback(async (nodeId: string, newName: string) => {
+    if (!currentProject) throw new Error('No project selected');
+    await db.renameNode(currentProject.id, nodeId, newName);
+
+    // 重新加载文件树
+    const tree = await db.getFileTree(currentProject.id);
+    setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree } : null);
+  }, [currentProject]);
+
+  const moveNode = useCallback(async (nodeId: string, newParentId: string) => {
+    if (!currentProject) throw new Error('No project selected');
+    // 移动节点的逻辑：先删除再添加到新位置
+    // 这里简化处理，实际需要更复杂的树操作
+    const tree = await db.getFileTree(currentProject.id);
+    if (!tree) return;
+
+    // 深拷贝并移动节点
+    const findAndRemove = (node: FileNode, id: string): FileNode | null => {
+      if (!node.children) return null;
+      const index = node.children.findIndex(c => c.id === id);
+      if (index !== -1) {
+        const [removed] = node.children.splice(index, 1);
+        return removed;
+      }
+      for (const child of node.children) {
+        const found = findAndRemove(child, id);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    const addToParent = (node: FileNode, id: string, child: FileNode): boolean => {
+      if (node.id === id && node.type === 'folder') {
+        node.children = node.children || [];
+        node.children.push(child);
+        return true;
+      }
+      if (node.children) {
+        for (const c of node.children) {
+          if (addToParent(c, id, child)) return true;
+        }
+      }
+      return false;
+    };
+
+    const movedNode = findAndRemove(tree, nodeId);
+    if (movedNode) {
+      addToParent(tree, newParentId, movedNode);
+      await db.updateFileTree(currentProject.id, tree);
+      setCurrentProject(prev => prev ? { ...prev, fileTree: tree } : null);
+    }
+  }, [currentProject]);
+
   const value: DataContextValue = {
     projects,
     currentProject,
@@ -138,6 +242,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     createPost,
     deletePost,
     createReply,
+    createFolder,
+    createFile,
+    updateFileContent,
+    deleteNode,
+    renameNode,
+    moveNode,
     members: currentProject?.members || [],
     fileTree: currentProject?.fileTree || null,
     timeline: currentProject?.timeline || [],

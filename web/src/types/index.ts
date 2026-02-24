@@ -45,6 +45,7 @@ export interface FileNode {
   size?: number;
   mimeType?: string;
   postCount?: number;
+  content?: string; // 文件内容
 }
 
 // 时间线事件

@@ -173,6 +173,231 @@ export const db = {
     return project?.timeline || [];
   },
 
+  // 创建文件夹
+  async createFolder(projectId: string, parentId: string, name: string): Promise<FileNode> {
+    const data = getData();
+    const project = data.projects.find(p => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+
+    const folder: FileNode = {
+      id: `folder-${generateId()}`,
+      name,
+      type: 'folder',
+      children: [],
+    };
+
+    const addToParent = (node: FileNode): boolean => {
+      if (node.id === parentId && node.type === 'folder') {
+        node.children = node.children || [];
+        node.children.push(folder);
+        return true;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          if (addToParent(child)) return true;
+        }
+      }
+      return false;
+    };
+
+    if (parentId === project.fileTree.id || parentId === 'root') {
+      project.fileTree.children = project.fileTree.children || [];
+      project.fileTree.children.push(folder);
+    } else {
+      addToParent(project.fileTree);
+    }
+
+    saveData(data);
+    return folder;
+  },
+
+  // 创建文件
+  async createFile(projectId: string, parentId: string, name: string, content: string = ''): Promise<FileNode> {
+    const data = getData();
+    const project = data.projects.find(p => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+
+    const ext = name.split('.').pop()?.toLowerCase() || 'txt';
+    const mimeTypes: Record<string, string> = {
+      ts: 'text/typescript',
+      tsx: 'text/typescript-jsx',
+      js: 'text/javascript',
+      jsx: 'text/javascript-jsx',
+      json: 'application/json',
+      md: 'text/markdown',
+      txt: 'text/plain',
+    };
+
+    const file: FileNode = {
+      id: `file-${generateId()}`,
+      name,
+      type: 'file',
+      content,
+      size: content.length,
+      mimeType: mimeTypes[ext] || 'text/plain',
+    };
+
+    const addToParent = (node: FileNode): boolean => {
+      if (node.id === parentId && node.type === 'folder') {
+        node.children = node.children || [];
+        node.children.push(file);
+        return true;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          if (addToParent(child)) return true;
+        }
+      }
+      return false;
+    };
+
+    if (parentId === project.fileTree.id || parentId === 'root') {
+      project.fileTree.children = project.fileTree.children || [];
+      project.fileTree.children.push(file);
+    } else {
+      addToParent(project.fileTree);
+    }
+
+    // 添加时间线事件
+    project.timeline.unshift({
+      id: `event-${generateId()}`,
+      type: 'create',
+      fileName: name,
+      filePath: name,
+      author: { id: 'u1', name: '张三', type: 'human' },
+      summary: '创建了文件',
+      createdAt: new Date().toISOString(),
+    });
+
+    saveData(data);
+    return file;
+  },
+
+  // 更新文件树（拖拽后）
+  async updateFileTree(projectId: string, tree: FileNode): Promise<void> {
+    const data = getData();
+    const project = data.projects.find(p => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+    project.fileTree = tree;
+    saveData(data);
+  },
+
+  // 获取文件内容
+  async getFileContent(projectId: string, fileId: string): Promise<string> {
+    const data = getData();
+    const project = data.projects.find(p => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+
+    const findFile = (node: FileNode): FileNode | null => {
+      if (node.id === fileId) return node;
+      if (node.children) {
+        for (const child of node.children) {
+          const found = findFile(child);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    const file = findFile(project.fileTree);
+    return file?.content || '';
+  },
+
+  // 更新文件内容
+  async updateFileContent(projectId: string, fileId: string, content: string): Promise<void> {
+    const data = getData();
+    const project = data.projects.find(p => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+
+    const findAndUpdate = (node: FileNode): boolean => {
+      if (node.id === fileId) {
+        node.content = content;
+        node.size = content.length;
+        return true;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          if (findAndUpdate(child)) return true;
+        }
+      }
+      return false;
+    };
+
+    findAndUpdate(project.fileTree);
+
+    // 添加时间线事件
+    const findName = (node: FileNode): string | null => {
+      if (node.id === fileId) return node.name;
+      if (node.children) {
+        for (const child of node.children) {
+          const name = findName(child);
+          if (name) return name;
+        }
+      }
+      return null;
+    };
+
+    const fileName = findName(project.fileTree) || 'unknown';
+    project.timeline.unshift({
+      id: `event-${generateId()}`,
+      type: 'modify',
+      fileName,
+      filePath: fileName,
+      author: { id: 'u1', name: '张三', type: 'human' },
+      summary: '修改了文件',
+      createdAt: new Date().toISOString(),
+    });
+
+    saveData(data);
+  },
+
+  // 删除文件/文件夹
+  async deleteNode(projectId: string, nodeId: string): Promise<void> {
+    const data = getData();
+    const project = data.projects.find(p => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+
+    const removeFromParent = (node: FileNode): boolean => {
+      if (node.children) {
+        const index = node.children.findIndex(c => c.id === nodeId);
+        if (index !== -1) {
+          node.children.splice(index, 1);
+          return true;
+        }
+        for (const child of node.children) {
+          if (removeFromParent(child)) return true;
+        }
+      }
+      return false;
+    };
+
+    removeFromParent(project.fileTree);
+    saveData(data);
+  },
+
+  // 重命名文件/文件夹
+  async renameNode(projectId: string, nodeId: string, newName: string): Promise<void> {
+    const data = getData();
+    const project = data.projects.find(p => p.id === projectId);
+    if (!project) throw new Error('Project not found');
+
+    const findAndRename = (node: FileNode): boolean => {
+      if (node.id === nodeId) {
+        node.name = newName;
+        return true;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          if (findAndRename(child)) return true;
+        }
+      }
+      return false;
+    };
+
+    findAndRename(project.fileTree);
+    saveData(data);
+  },
+
   // 重置数据（用于开发测试）
   async reset(): Promise<void> {
     if (typeof window === 'undefined') return;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Post, Member, FileNode, Attachment } from '@/types';
 import { usePosts } from '@/hooks/usePosts';
 
@@ -9,6 +9,9 @@ interface Props {
   members: Member[];
   files: FileNode;
   onSelectPost: (post: Post) => void;
+  referencedFiles?: FileNode[];
+  onClearReferences?: () => void;
+  triggerCompose?: boolean;
 }
 
 function formatTime(dateStr: string) {
@@ -30,7 +33,7 @@ function flattenFiles(node: FileNode, result: FileNode[] = []): FileNode[] {
   return result;
 }
 
-export default function PostList({ posts, members, files, onSelectPost }: Props) {
+export default function PostList({ posts, members, files, onSelectPost, referencedFiles = [], onClearReferences, triggerCompose }: Props) {
   const { createPost } = usePosts();
   const [filterMember, setFilterMember] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -39,6 +42,14 @@ export default function PostList({ posts, members, files, onSelectPost }: Props)
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 处理引用文件触发
+  useEffect(() => {
+    if (triggerCompose && referencedFiles.length > 0) {
+      setAttachedFiles(referencedFiles);
+      setShowCompose(true);
+    }
+  }, [triggerCompose, referencedFiles]);
 
   const filteredPosts = filterMember
     ? posts.filter(p => p.author.id === filterMember)
