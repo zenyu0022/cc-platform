@@ -1,0 +1,17 @@
+{
+  "name": "collab-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "poll:start": "tsx cc-poll.ts",
+    "poll:once": "tsx cc-poll.ts --once",
+    "poll:test": "EXECUTOR=echo tsx cc-poll.ts --once",
+    "poll:dev": "POLL_INTERVAL=10000 EXECUTOR=echo tsx cc-poll.ts",
+    "poll:agents": "tsx cc-poll.ts --agents",
+    "tunnel": "cloudflared tunnel --url http://localhost:3000"
+  },
+  "dependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.0.0"
+  }
+}
