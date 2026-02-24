@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Post, Member, FileNode, Attachment } from '@/types';
 import { usePosts } from '@/hooks/usePosts';
+import { useAuthors } from '@/hooks/useAuthors';
 
 interface Props {
   posts: Post[];
@@ -42,6 +43,9 @@ export default function PostList({ posts, members, files, onSelectPost, referenc
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 动态从帖子和回复中提取发帖人
+  const authors = useAuthors(posts || [], undefined, members);
 
   // 处理引用文件触发
   useEffect(() => {
@@ -114,11 +118,11 @@ export default function PostList({ posts, members, files, onSelectPost, referenc
         </button>
       </header>
 
-      {/* Filters */}
-      <div className="h-12 px-6 flex items-center gap-2 border-b border-neutral-100">
+      {/* Filters - 动态发帖人列表 */}
+      <div className="h-12 px-6 flex items-center gap-2 border-b border-neutral-100 overflow-x-auto">
         <button
           onClick={() => setFilterMember(null)}
-          className={`h-7 px-3 text-xs font-medium rounded-md transition-colors ${
+          className={`h-7 px-3 text-xs font-medium rounded-md transition-colors flex-shrink-0 ${
             filterMember === null
               ? 'bg-neutral-900 text-white'
               : 'text-neutral-500 hover:bg-neutral-100'
@@ -126,24 +130,24 @@ export default function PostList({ posts, members, files, onSelectPost, referenc
         >
           全部
         </button>
-        {members.map((member) => (
+        {authors.map((author) => (
           <button
-            key={member.id}
-            onClick={() => setFilterMember(member.id)}
-            className={`h-7 px-3 flex items-center gap-1.5 text-xs font-medium rounded-md transition-colors ${
-              filterMember === member.id
+            key={author.id}
+            onClick={() => setFilterMember(author.id)}
+            className={`h-7 px-3 flex items-center gap-1.5 text-xs font-medium rounded-md transition-colors flex-shrink-0 ${
+              filterMember === author.id
                 ? 'bg-neutral-900 text-white'
                 : 'text-neutral-500 hover:bg-neutral-100'
             }`}
           >
             <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-semibold ${
-              member.type === 'agent'
-                ? filterMember === member.id ? 'bg-white/20 text-white' : 'bg-violet-100 text-violet-600'
-                : filterMember === member.id ? 'bg-white/20 text-white' : 'bg-neutral-200 text-neutral-600'
+              author.type === 'agent'
+                ? filterMember === author.id ? 'bg-white/20 text-white' : 'bg-violet-100 text-violet-600'
+                : filterMember === author.id ? 'bg-white/20 text-white' : 'bg-neutral-200 text-neutral-600'
             }`}>
-              {member.type === 'agent' ? 'AI' : member.name[0]}
+              {author.type === 'agent' ? 'AI' : author.name[0]}
             </div>
-            {member.name.split(' ')[0]}
+            {author.name.split(' ')[0]}
           </button>
         ))}
       </div>

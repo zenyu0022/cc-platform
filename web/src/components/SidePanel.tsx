@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { FileNode, TimelineEvent, Member } from '@/types';
+import { useAuthors } from '@/hooks/useAuthors';
 import FileTree from './FileTree';
 
 interface Props {
@@ -66,6 +67,9 @@ export default function SidePanel({
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // 动态从 timeline 中提取发帖人
+  const activityAuthors = useAuthors([], timeline || [], members);
 
   const filteredTimeline = filterMember
     ? (timeline || []).filter(e => e.author.id === filterMember)
@@ -244,7 +248,7 @@ export default function SidePanel({
 
       {activeTab === 'activity' && (
         <div className="flex-1 overflow-auto">
-          {/* Filters */}
+          {/* Filters - 动态发帖人列表 */}
           <div className="px-4 py-3 border-b border-neutral-100">
             <div className="flex items-center gap-1.5 flex-wrap">
               <button
@@ -257,17 +261,17 @@ export default function SidePanel({
               >
                 全部
               </button>
-              {(members || []).map((member) => (
+              {activityAuthors.map((author) => (
                 <button
-                  key={member.id}
-                  onClick={() => setFilterMember(member.id)}
+                  key={author.id}
+                  onClick={() => setFilterMember(author.id)}
                   className={`h-6 px-2 text-[11px] font-medium rounded transition-colors ${
-                    filterMember === member.id
+                    filterMember === author.id
                       ? 'bg-neutral-900 text-white'
                       : 'text-neutral-500 hover:bg-neutral-100'
                   }`}
                 >
-                  {member.name.split(' ')[0]}
+                  {author.name.split(' ')[0]}
                 </button>
               ))}
             </div>

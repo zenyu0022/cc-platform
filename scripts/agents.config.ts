@@ -2,7 +2,10 @@
  * 多 Agent 配置
  *
  * 定义公共规范和各 Agent 的专属规范
+ * 支持静态 Agent 和动态创建的 Agent
  */
+
+import { TaskType } from './task-analyzer';
 
 export interface AgentConfig {
   id: string;
@@ -13,6 +16,10 @@ export interface AgentConfig {
   systemPrompt: string;
   workingDir?: string;
   timeout?: number;
+  // 动态 Agent 标记
+  isDynamic?: boolean;
+  createdAt?: string;
+  taskCategory?: string;
 }
 
 // ==================== 公共规范（所有 Agent 共享） ====================
@@ -88,7 +95,7 @@ ${COMMON_RULES}
 - 需要文档更新 → @CC3
 `,
     workingDir: process.env.WORK_DIR,
-    timeout: 60000,
+    timeout: 300000,  // 5分钟，适合复杂任务
   },
 
   CC2: {
@@ -242,4 +249,165 @@ ${task.content}
 
 ---
 请执行上述任务，完成后给出简洁的结果摘要。`;
+}
+
+// ==================== 动态 Agent 系统 ====================
+
+// 任务类型 -> Agent 角色映射
+const TASK_TO_ROLE: Record<string, { role: string; keywords: string[] }> = {
+  code: { role: 'developer', keywords: ['developer', 'coder', 'programmer', '开发'] },
+  review: { role: 'reviewer', keywords: ['reviewer', 'auditor', '审查'] },
+  docs: { role: 'documenter', keywords: ['documenter', 'writer', '文档'] },
+  research: { role: 'researcher', keywords: ['researcher', 'analyst', '调研'] },
+  testing: { role: 'tester', keywords: ['tester', 'qa', '测试'] },
+  general: { role: 'assistant', keywords: ['assistant', 'helper', '通用'] },
+};
+
+// 动态 Agent 模板
+const DYNAMIC_TEMPLATES: Record<string, { description: string; promptAddition: string; timeout: number }> = {
+  code: {
+    description: '代码开发专家 - 专注代码编写、调试和优化',
+    promptAddition: `
+## 动态分配的职责
+你是根据任务类型动态创建的**代码开发专家**。
+- 专注于高效、高质量的代码实现
+- 遵循最佳实践和设计模式
+- 确保代码可测试、可维护
+`,
+    timeout: 120000,
+  },
+  review: {
+    description: '代码审查专家 - 专注代码质量和安全检查',
+    promptAddition: `
+## 动态分配的职责
+你是根据任务类型动态创建的**代码审查专家**。
+- 严格检查代码质量和规范性
+- 识别潜在的安全风险和性能问题
+- 提供具体的改进建议
+`,
+    timeout: 60000,
+  },
+  docs: {
+    description: '文档编写专家 - 专注技术文档和注释',
+    promptAddition: `
+## 动态分配的职责
+你是根据任务类型动态创建的**文档编写专家**。
+- 编写清晰、结构化的技术文档
+- 提供完整可运行的代码示例
+- 确保文档与代码同步更新
+`,
+    timeout: 60000,
+  },
+  research: {
+    description: '调研分析专家 - 专注技术调研和方案评估',
+    promptAddition: `
+## 动态分配的职责
+你是根据任务类型动态创建的**调研分析专家**。
+- 全面分析技术方案的优劣
+- 提供客观的数据和对比
+- 给出可操作的建议
+`,
+    timeout: 90000,
+  },
+  testing: {
+    description: '测试工程师 - 专注测试用例设计和验证',
+    promptAddition: `
+## 动态分配的职责
+你是根据任务类型动态创建的**测试工程师**。
+- 设计全面的测试用例
+- 覆盖边界条件和异常场景
+- 确保测试可重复执行
+`,
+    timeout: 90000,
+  },
+  general: {
+    description: '通用助手 - 处理各类通用任务',
+    promptAddition: `
+## 动态分配的职责
+你是**通用助手**，可以处理各类简单任务。
+- 快速响应，直接执行
+- 保持简洁明了
+`,
+    timeout: 30000,
+  },
+};
+
+// 动态 Agent 运行时存储
+const dynamicAgents: Map<string, AgentConfig> = new Map();
+
+/**
+ * 根据任务类型查找匹配的现有 Agent
+ */
+export function findMatchingAgent(taskType: TaskType): AgentConfig | null {
+  const roleMapping = TASK_TO_ROLE[taskType.category];
+  if (!roleMapping) return null;
+
+  // 先检查静态 Agent
+  for (const agent of Object.values(AGENTS)) {
+    if (roleMapping.keywords.some(kw =>
+      agent.role.toLowerCase().includes(kw.toLowerCase()) ||
+      agent.description.toLowerCase().includes(kw.toLowerCase())
+    )) {
+      return agent;
+    }
+  }
+
+  // 再检查动态 Agent
+  for (const agent of dynamicAgents.values()) {
+    if (agent.taskCategory === taskType.category) {
+      return agent;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 动态创建新 Agent
+ */
+export function createDynamicAgent(taskType: TaskType, taskTitle: string): AgentConfig {
+  const template = DYNAMIC_TEMPLATES[taskType.category] || DYNAMIC_TEMPLATES['general'];
+  const timestamp = Date.now();
+  const agentId = `cc-dynamic-${timestamp}`;
+  const categoryName = taskType.category.toUpperCase();
+
+  const agent: AgentConfig = {
+    id: agentId,
+    name: `CC-${categoryName}`,
+    role: TASK_TO_ROLE[taskType.category]?.role || 'assistant',
+    description: template.description,
+    triggerKeywords: [],  // 动态 Agent 无触发词
+    systemPrompt: `
+你是一个 Claude Code Agent，名叫 **CC-${categoryName}**。
+
+${COMMON_RULES}
+${template.promptAddition}
+`,
+    workingDir: process.env.WORK_DIR,
+    timeout: template.timeout,
+    isDynamic: true,
+    createdAt: new Date().toISOString(),
+    taskCategory: taskType.category,
+  };
+
+  dynamicAgents.set(agentId, agent);
+  console.log(`   🆕 [动态创建] ${agent.name} - ${agent.description}`);
+  return agent;
+}
+
+/**
+ * 获取所有 Agent（包括静态和动态）
+ */
+export function getAllAgents(): AgentConfig[] {
+  return [...Object.values(AGENTS), ...dynamicAgents.values()];
+}
+
+/**
+ * 获取动态 Agent 统计
+ */
+export function getDynamicAgentStats(): { count: number; categories: string[] } {
+  return {
+    count: dynamicAgents.size,
+    categories: [...new Set([...dynamicAgents.values()].map(a => a.taskCategory))],
+  };
 }

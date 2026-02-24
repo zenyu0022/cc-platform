@@ -24,7 +24,11 @@ import {
   getAgentList,
   buildExecutionPrompt,
   AgentConfig,
+  findMatchingAgent,
+  createDynamicAgent,
+  getAllAgents,
 } from './agents.config';
+import { analyzeTask, getTaskTypeDescription, TaskType } from './task-analyzer';
 
 // ==================== 配置 ====================
 const CONFIG = {
@@ -61,6 +65,8 @@ interface Task {
   content: string;
   author: string;
   targetAgents: string[];
+  taskType?: TaskType;  // 任务类型（动态分配时使用）
+  isDynamicAssignment?: boolean;  // 是否为动态分配
 }
 
 // ==================== API 调用 ====================
@@ -131,24 +137,56 @@ async function findPendingTasks(posts: Post[]): Promise<Task[]> {
     const detail = await fetchPostDetail(CONFIG.defaultProjectId, post.id);
     const replies = detail?.replies || [];
 
-    // 确定目标 Agents
-    const targetAgents = mentions.length > 0 ? mentions : [CONFIG.defaultAgent];
+    // 情况 1: 明确指定了 Agent (@CC1, @CC2 等)
+    if (mentions.length > 0) {
+      for (const agentId of mentions) {
+        const agent = getAgent(agentId);
+        if (!agent) continue;
 
-    // 检查每个目标 Agent 是否已处理
-    for (const agentId of targetAgents) {
-      const agent = getAgent(agentId);
-      if (!agent) continue;
+        if (!isProcessedByAgent(replies, agent.id)) {
+          const allKeywords = [...agent.triggerKeywords, '@cc', '@CC'];
+          const instruction = extractInstruction(post.content, allKeywords);
 
+          tasks.push({
+            postId: post.id,
+            title: post.title,
+            content: instruction || post.content,
+            author: post.author.name,
+            targetAgents: [agentId],
+            isDynamicAssignment: false,
+          });
+        }
+      }
+    }
+    // 情况 2: 只有 @cc，需要分析任务类型并智能分配
+    else if (hasGenericTrigger) {
+      // 提取指令内容
+      const instruction = extractInstruction(post.content, ['@cc', '@CC', '@Cc']);
+
+      // 分析任务类型
+      const taskType = analyzeTask(post.title, instruction);
+      console.log(`   📊 [任务分析] "${post.title}" → ${taskType.category} (置信度: ${taskType.confidence})`);
+
+      // 查找匹配的 Agent
+      let agent = findMatchingAgent(taskType);
+      let isDynamic = false;
+
+      if (!agent) {
+        // 没有匹配的 Agent，动态创建
+        agent = createDynamicAgent(taskType, post.title);
+        isDynamic = true;
+      }
+
+      // 检查是否已处理
       if (!isProcessedByAgent(replies, agent.id)) {
-        const allKeywords = [...agent.triggerKeywords, '@cc', '@CC'];
-        const instruction = extractInstruction(post.content, allKeywords);
-
         tasks.push({
           postId: post.id,
           title: post.title,
           content: instruction || post.content,
           author: post.author.name,
-          targetAgents: [agentId],
+          targetAgents: [agent.id],
+          taskType,
+          isDynamicAssignment: isDynamic,
         });
       }
     }
@@ -158,10 +196,9 @@ async function findPendingTasks(posts: Post[]): Promise<Task[]> {
 }
 
 // ==================== Claude Code 执行 ====================
-async function executeWithAgent(task: Task, agentId: string): Promise<string> {
-  const agent = getAgent(agentId);
+async function executeWithAgent(task: Task, agent: AgentConfig): Promise<string> {
   if (!agent) {
-    return `❌ 未知的 Agent: ${agentId}`;
+    return `❌ 未知的 Agent`;
   }
 
   console.log(`\n🤖 [${agent.name}] 执行任务: "${task.title}"`);
@@ -256,30 +293,54 @@ async function pollOnce(): Promise<void> {
     console.log(`   发现 ${tasks.length} 个待处理任务`);
 
     for (const task of tasks) {
+      // 获取 Agent（支持动态 Agent）
+      let agent: AgentConfig | undefined;
       for (const agentId of task.targetAgents) {
-        const agent = getAgent(agentId);
-        if (!agent) continue;
+        agent = getAgent(agentId) || getAllAgents().find(a => a.id === agentId);
+        if (agent) break;
+      }
+      if (!agent) {
+        console.log(`   ⚠️ 未找到 Agent: ${task.targetAgents.join(', ')}`);
+        continue;
+      }
 
-        const result = await executeWithAgent(task, agentId);
+      // 先回复"已收到"
+      await createReply(
+        CONFIG.defaultProjectId,
+        task.postId,
+        `[CC-RECEIVED]\n\n✅ 任务已收到，正在执行...\n\n_${agent.name} 于 ${new Date().toLocaleString()}_`,
+        agent.id,
+        agent.name
+      );
+      console.log(`   📩 [${agent.name}] 已回复"收到" ${task.postId}`);
 
-        const reply = `[CC-DONE]
+      const result = await executeWithAgent(task, agent);
 
-**${agent.name} (${agent.role}) 任务完成**
+      // 构建回复，包含 Agent 类型信息
+      const agentInfo = task.isDynamicAssignment
+        ? `\n_🆎 动态分配: ${getTaskTypeDescription(task.taskType!)}_`
+        : '';
+      const workingDirInfo = agent.workingDir
+        ? `\n_📁 工作目录: ${agent.workingDir}_`
+        : '';
+
+      const reply = `[CC-DONE]
+
+**${agent.name} (${agent.role}) 任务完成**${agentInfo}
 
 ${result}
 
 ---
-_${agent.name} 于 ${new Date().toLocaleString()} 执行_`;
+_${agent.name} 于 ${new Date().toLocaleString()} 执行_${workingDirInfo}`;
 
-        await createReply(
-          CONFIG.defaultProjectId,
-          task.postId,
-          reply,
-          agent.id,
-          agent.name
-        );
-        console.log(`   ✅ [${agent.name}] 已回复帖子 ${task.postId}`);
-      }
+      await createReply(
+        CONFIG.defaultProjectId,
+        task.postId,
+        reply,
+        agent.id,
+        agent.name
+      );
+      console.log(`   ✅ [${agent.name}] 已回复帖子 ${task.postId}`);
     }
   } catch (error: any) {
     console.error('   ❌ 轮询错误:', error.message);
