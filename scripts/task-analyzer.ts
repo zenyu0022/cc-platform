@@ -128,33 +128,56 @@ export interface TaskComplexity {
  * 分析任务复杂度
  */
 export function analyzeComplexity(title: string, content: string): TaskComplexity {
-  const fullText = `${title} ${content}`.toLowerCase();
+  const fullText = `${title} ${content}`;
   const subTasks: SubTask[] = [];
 
-  // 检测多步骤任务的模式
-  const stepPatterns = [
-    /步骤\s*[1234]|首先|然后|接着|最后|第一步|第二步|第三步/g,
-    /\d+[\.、]\s*\S+/g,  // 1. xxx, 2、xxx
-  ];
+  // 检测编号步骤的模式 (1. xxx, 2. xxx, 一、xxx)
+  const numberedStepPattern = /(?:^|\n)\s*(\d+[\.、)]\s*.+?)(?=(?:\n\s*\d+[\.、)])|$)/g;
+  // 检测中文章节模式 (一、二、三)
+  const chineseStepPattern = /(?:^|\n)\s*([一二三四五六七八九十]+[、.]\s*.+?)(?=(?:\n\s*[一二三四五六七八九十]+[、.])|$)/g;
 
-  // 提取步骤
-  const steps: string[] = [];
-  for (const pattern of stepPatterns) {
-    const matches = fullText.matchAll(pattern);
-    for (const match of matches) {
-      if (match[0] && match[0].trim()) {
-        steps.push(match[0].trim());
+  // 提取编号步骤
+  const numberedSteps: string[] = [];
+  let match;
+  while ((match = numberedStepPattern.exec(fullText)) !== null) {
+    if (match[1] && match[1].trim().length > 3) {
+      numberedSteps.push(match[1].trim());
+    }
+  }
+
+  // 如果没有编号步骤，检查中文步骤
+  if (numberedSteps.length === 0) {
+    while ((match = chineseStepPattern.exec(fullText)) !== null) {
+      if (match[1] && match[1].trim().length > 3) {
+        numberedSteps.push(match[1].trim());
       }
     }
   }
 
   // 检测动词来判断操作数量
-  const actionVerbs = ['运行', '执行', '调用', '启动', '推送', '发送', '更新', '同步', '爬取', '抓取', '获取', '下载', '分析', '处理', '生成', '创建', '上传', '保存', '写入', '检查', '验证', '测试'];
-  const detectedActions = actionVerbs.filter(verb => fullText.includes(verb));
+  const actionPatterns = [
+    { pattern: /运行\s*[\w-]+/g, name: '运行' },
+    { pattern: /执行\s*[\w-]+/g, name: '执行' },
+    { pattern: /调用\s*[\w-]+/g, name: '调用' },
+    { pattern: /启动\s*[\w-]+/g, name: '启动' },
+    { pattern: /推送.*?wxpusher/gi, name: '推送通知' },
+    { pattern: /爬取|抓取/g, name: '爬取' },
+    { pattern: /生成.*?简[报讯]/g, name: '生成简报' },
+    { pattern: /更新\s*[\w-]+/g, name: '更新' },
+    { pattern: /同步\s*[\w-]+/g, name: '同步' },
+  ];
+
+  const detectedActions: string[] = [];
+  for (const { pattern, name } of actionPatterns) {
+    const matches = fullText.match(pattern);
+    if (matches) {
+      matches.forEach(m => detectedActions.push(m.trim()));
+    }
+  }
 
   // 创建子任务
-  if (steps.length >= 2) {
-    steps.forEach((step, index) => {
+  if (numberedSteps.length >= 2) {
+    numberedSteps.forEach((step, index) => {
       subTasks.push({
         id: `subtask-${index + 1}`,
         description: step,
@@ -163,10 +186,12 @@ export function analyzeComplexity(title: string, content: string): TaskComplexit
       });
     });
   } else if (detectedActions.length >= 3) {
-    detectedActions.forEach((action, index) => {
+    // 去重
+    const uniqueActions = [...new Set(detectedActions)];
+    uniqueActions.slice(0, 5).forEach((action, index) => {
       subTasks.push({
         id: `subtask-${index + 1}`,
-        description: `执行 ${action} 操作`,
+        description: action,
         estimatedTime: 60000,
         dependencies: [],
       });
@@ -175,30 +200,31 @@ export function analyzeComplexity(title: string, content: string): TaskComplexit
 
   // 检测关键词判断复杂度
   const complexKeywords = [
-    '多个项目', '3个', '三个', '所有', '批量', '并行', '同时',
-    '完整', '整个', '全部', '递归', '嵌套', '循环',
+    '多个项目', '3个', '三个', '4个', '所有', '批量', '并行', '同时',
+    '完整', '整个', '全部', '递归', '嵌套', '循环', '简报',
   ];
 
   const simpleKeywords = [
-    '回复', '说', '显示', '列出', '查看', '简单', '快速',
+    '回复', '说', '显示', '列出', '查看', '简单', '快速', '测试收到',
   ];
 
   let complexityScore = detectedActions.length;
+  const fullTextLower = fullText.toLowerCase();
   for (const kw of complexKeywords) {
-    if (fullText.includes(kw)) complexityScore += 2;
+    if (fullTextLower.includes(kw.toLowerCase())) complexityScore += 2;
   }
   for (const kw of simpleKeywords) {
-    if (fullText.includes(kw)) complexityScore -= 1;
+    if (fullTextLower.includes(kw.toLowerCase())) complexityScore -= 2;
   }
 
   // 判断复杂度级别
   let level: 'simple' | 'moderate' | 'complex';
   let estimatedTotalTime: number;
 
-  if (subTasks.length >= 3 || complexityScore >= 4) {
+  if (subTasks.length >= 3 || complexityScore >= 5) {
     level = 'complex';
     estimatedTotalTime = 300000; // 5分钟+
-  } else if (subTasks.length >= 2 || complexityScore >= 2) {
+  } else if (subTasks.length >= 2 || complexityScore >= 3) {
     level = 'moderate';
     estimatedTotalTime = 120000; // 2分钟
   } else {
