@@ -328,7 +328,7 @@ export const serverDb = {
   async getTimeline(projectId: string, limit: number) {
     const { data, error } = await supabase
       .from('timeline_events')
-      .select('id, type, file_name, summary, author:author_name(name), created_at')
+      .select('id, type, file_name, summary, author_name, created_at')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -339,7 +339,7 @@ export const serverDb = {
       id: e.id,
       type: e.type,
       fileName: e.file_name,
-      author: { name: (e.author as any)?.name || 'Unknown' },
+      author: { name: e.author_name || 'Unknown' },
       summary: e.summary,
       createdAt: e.created_at,
     }));

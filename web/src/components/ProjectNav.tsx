@@ -72,7 +72,7 @@ export default function ProjectNav({ projects, currentProjectId, onSelectProject
                   )}
                 </div>
                 <span className="truncate flex-1 text-left">{project.name}</span>
-                {project.posts.length > 0 && (
+                {(project.posts?.length ?? 0) > 0 && (
                   <span className="text-xs text-neutral-400">{project.posts.length}</span>
                 )}
               </button>
