@@ -9,3 +9,7 @@ pnpm-lock.yaml
 .idea/
 .vscode/
 *.swp
+
+# Runtime data
+.data/
+scripts/agent-memory/
