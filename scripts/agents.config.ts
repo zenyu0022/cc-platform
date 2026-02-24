@@ -411,3 +411,189 @@ export function getDynamicAgentStats(): { count: number; categories: string[] } 
     categories: [...new Set([...dynamicAgents.values()].map(a => a.taskCategory))],
   };
 }
+
+// ==================== Agent 记忆持久化 ====================
+import * as fs from 'fs';
+import * as path from 'path';
+
+const MEMORY_DIR = path.join(process.cwd(), 'agent-memory');
+const AGENTS_FILE = path.join(MEMORY_DIR, 'agents.json');
+
+interface AgentMemory {
+  agent: AgentConfig;
+  taskHistory: Array<{
+    timestamp: string;
+    taskTitle: string;
+    taskContent: string;
+    resultSummary: string;
+    success: boolean;
+  }>;
+  learnedKnowledge: string[];
+  preferences: Record<string, string>;
+}
+
+// 确保目录存在
+function ensureMemoryDir(): void {
+  if (!fs.existsSync(MEMORY_DIR)) {
+    fs.mkdirSync(MEMORY_DIR, { recursive: true });
+  }
+}
+
+/**
+ * 保存所有动态 Agent 到文件
+ */
+export function saveDynamicAgents(): void {
+  ensureMemoryDir();
+  const agents: Record<string, AgentMemory> = {};
+
+  for (const [id, agent] of dynamicAgents) {
+    const memoryFile = path.join(MEMORY_DIR, `${id}.json`);
+    let memory: AgentMemory = {
+      agent,
+      taskHistory: [],
+      learnedKnowledge: [],
+      preferences: {},
+    };
+
+    // 如果已有记忆文件，保留历史
+    if (fs.existsSync(memoryFile)) {
+      try {
+        memory = JSON.parse(fs.readFileSync(memoryFile, 'utf-8'));
+        memory.agent = agent;  // 更新 agent 配置
+      } catch (e) {
+        // 解析失败，使用新的 memory
+      }
+    }
+
+    agents[id] = memory;
+    fs.writeFileSync(memoryFile, JSON.stringify(memory, null, 2));
+  }
+
+  // 保存索引
+  const index = Object.keys(agents);
+  fs.writeFileSync(AGENTS_FILE, JSON.stringify(index, null, 2));
+}
+
+/**
+ * 从文件加载动态 Agent
+ */
+export function loadDynamicAgents(): void {
+  ensureMemoryDir();
+
+  if (!fs.existsSync(AGENTS_FILE)) {
+    return;
+  }
+
+  try {
+    const index: string[] = JSON.parse(fs.readFileSync(AGENTS_FILE, 'utf-8'));
+
+    for (const agentId of index) {
+      const memoryFile = path.join(MEMORY_DIR, `${agentId}.json`);
+      if (fs.existsSync(memoryFile)) {
+        const memory: AgentMemory = JSON.parse(fs.readFileSync(memoryFile, 'utf-8'));
+        dynamicAgents.set(agentId, memory.agent);
+        console.log(`   📂 [加载记忆] ${memory.agent.name} (${memory.taskHistory.length} 条历史)`);
+      }
+    }
+  } catch (e) {
+    console.error('   ⚠️ 加载 Agent 记忆失败:', e);
+  }
+}
+
+/**
+ * 记录任务执行结果到 Agent 记忆
+ */
+export function recordTaskResult(
+  agentId: string,
+  taskTitle: string,
+  taskContent: string,
+  result: string,
+  success: boolean
+): void {
+  ensureMemoryDir();
+  const memoryFile = path.join(MEMORY_DIR, `${agentId}.json`);
+
+  let memory: AgentMemory;
+  const agent = dynamicAgents.get(agentId) || getAllAgents().find(a => a.id === agentId);
+
+  if (!agent) return;
+
+  if (fs.existsSync(memoryFile)) {
+    try {
+      memory = JSON.parse(fs.readFileSync(memoryFile, 'utf-8'));
+    } catch (e) {
+      memory = {
+        agent,
+        taskHistory: [],
+        learnedKnowledge: [],
+        preferences: {},
+      };
+    }
+  } else {
+    memory = {
+      agent,
+      taskHistory: [],
+      learnedKnowledge: [],
+      preferences: {},
+    };
+  }
+
+  // 添加任务历史（保留最近 100 条）
+  memory.taskHistory.unshift({
+    timestamp: new Date().toISOString(),
+    taskTitle,
+    taskContent: taskContent.substring(0, 200),
+    resultSummary: result.substring(0, 500),
+    success,
+  });
+  memory.taskHistory = memory.taskHistory.slice(0, 100);
+
+  // 更新 agent 配置
+  memory.agent = agent;
+
+  fs.writeFileSync(memoryFile, JSON.stringify(memory, null, 2));
+}
+
+/**
+ * 获取 Agent 的记忆
+ */
+export function getAgentMemory(agentId: string): AgentMemory | null {
+  const memoryFile = path.join(MEMORY_DIR, `${agentId}.json`);
+
+  if (fs.existsSync(memoryFile)) {
+    try {
+      return JSON.parse(fs.readFileSync(memoryFile, 'utf-8'));
+    } catch (e) {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * 构建 Agent 的记忆上下文（用于 prompt）
+ */
+export function buildMemoryContext(agentId: string): string {
+  const memory = getAgentMemory(agentId);
+  if (!memory || memory.taskHistory.length === 0) {
+    return '';
+  }
+
+  const recentTasks = memory.taskHistory.slice(0, 5);
+  let context = '\n## 历史任务记忆\n\n';
+
+  context += '### 最近执行的任务:\n';
+  for (const task of recentTasks) {
+    const status = task.success ? '✅' : '❌';
+    context += `- ${status} ${task.taskTitle}\n`;
+  }
+
+  if (memory.learnedKnowledge.length > 0) {
+    context += '\n### 学到的知识:\n';
+    for (const knowledge of memory.learnedKnowledge.slice(0, 5)) {
+      context += `- ${knowledge}\n`;
+    }
+  }
+
+  return context;
+}

@@ -27,6 +27,10 @@ import {
   findMatchingAgent,
   createDynamicAgent,
   getAllAgents,
+  loadDynamicAgents,
+  saveDynamicAgents,
+  recordTaskResult,
+  buildMemoryContext,
 } from './agents.config';
 import { analyzeTask, getTaskTypeDescription, TaskType } from './task-analyzer';
 
@@ -206,11 +210,17 @@ async function executeWithAgent(task: Task, agent: AgentConfig): Promise<string>
   console.log(`   指令: ${task.content.substring(0, 50)}...`);
   console.log(`   发布者: ${task.author}\n`);
 
+  // 获取 Agent 记忆上下文
+  const memoryContext = buildMemoryContext(agent.id);
+  if (memoryContext) {
+    console.log(`   📚 已加载记忆上下文`);
+  }
+
   const prompt = buildExecutionPrompt(agent, {
     title: task.title,
     content: task.content,
     author: task.author,
-  });
+  }) + memoryContext;
 
   // 测试模式
   if (CONFIG.executor === 'echo') {
@@ -316,6 +326,15 @@ async function pollOnce(): Promise<void> {
 
       const result = await executeWithAgent(task, agent);
 
+      // 记录任务结果到 Agent 记忆
+      recordTaskResult(
+        agent.id,
+        task.title,
+        task.content,
+        result,
+        !result.includes('❌')
+      );
+
       // 构建回复，包含 Agent 类型信息
       const agentInfo = task.isDynamicAssignment
         ? `\n_🆎 动态分配: ${getTaskTypeDescription(task.taskType!)}_`
@@ -351,6 +370,11 @@ async function startPolling(): Promise<void> {
   console.log('='.repeat(60));
   console.log('🚀 CC 多 Agent 任务轮询器启动');
   console.log('='.repeat(60));
+
+  // 加载持久化的动态 Agent
+  console.log('\n📂 加载 Agent 记忆...');
+  loadDynamicAgents();
+
   console.log(`   API: ${CONFIG.apiUrl}`);
   console.log(`   项目: ${CONFIG.defaultProjectId}`);
   console.log(`   间隔: ${CONFIG.pollInterval / 1000} 秒`);
