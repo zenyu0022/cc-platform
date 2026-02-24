@@ -8,9 +8,10 @@ interface Props {
   currentProjectId: string;
   onSelectProject: (id: string) => void;
   onCreateProject: (input: { name: string; description?: string; visibility: 'private' | 'team' | 'public' }) => Promise<unknown>;
+  onCloseMobile?: () => void;
 }
 
-export default function ProjectNav({ projects, currentProjectId, onSelectProject, onCreateProject }: Props) {
+export default function ProjectNav({ projects, currentProjectId, onSelectProject, onCreateProject, onCloseMobile }: Props) {
   const [showModal, setShowModal] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -38,7 +39,17 @@ export default function ProjectNav({ projects, currentProjectId, onSelectProject
 
   return (
     <>
-      <aside className="w-60 h-full bg-white border-r border-neutral-200 flex flex-col">
+      <aside className="w-60 h-full bg-white border-r border-neutral-200 flex flex-col relative">
+        {/* 移动端关闭按钮 */}
+        <button
+          onClick={onCloseMobile}
+          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-lg md:hidden z-10"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+
         {/* Header */}
         <header className="h-14 px-4 flex items-center border-b border-neutral-100">
           <div className="flex items-center gap-2">

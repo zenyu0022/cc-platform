@@ -108,6 +108,116 @@ export function analyzeTask(title: string, content: string): TaskType {
   };
 }
 
+// ==================== 任务复杂度分析 ====================
+
+export interface SubTask {
+  id: string;
+  description: string;
+  estimatedTime: number;  // 预估时间（毫秒）
+  dependencies: string[];  // 依赖的其他子任务 ID
+}
+
+export interface TaskComplexity {
+  level: 'simple' | 'moderate' | 'complex';
+  estimatedTotalTime: number;
+  subTasks: SubTask[];
+  canParallelize: boolean;
+}
+
+/**
+ * 分析任务复杂度
+ */
+export function analyzeComplexity(title: string, content: string): TaskComplexity {
+  const fullText = `${title} ${content}`.toLowerCase();
+  const subTasks: SubTask[] = [];
+
+  // 检测多步骤任务的模式
+  const stepPatterns = [
+    /步骤\s*[1234]|首先|然后|接着|最后|第一步|第二步|第三步/g,
+    /\d+[\.、]\s*\S+/g,  // 1. xxx, 2、xxx
+  ];
+
+  // 提取步骤
+  const steps: string[] = [];
+  for (const pattern of stepPatterns) {
+    const matches = fullText.matchAll(pattern);
+    for (const match of matches) {
+      if (match[0] && match[0].trim()) {
+        steps.push(match[0].trim());
+      }
+    }
+  }
+
+  // 检测动词来判断操作数量
+  const actionVerbs = ['运行', '执行', '调用', '启动', '推送', '发送', '更新', '同步', '爬取', '抓取', '获取', '下载', '分析', '处理', '生成', '创建', '上传', '保存', '写入', '检查', '验证', '测试'];
+  const detectedActions = actionVerbs.filter(verb => fullText.includes(verb));
+
+  // 创建子任务
+  if (steps.length >= 2) {
+    steps.forEach((step, index) => {
+      subTasks.push({
+        id: `subtask-${index + 1}`,
+        description: step,
+        estimatedTime: 60000,
+        dependencies: [],
+      });
+    });
+  } else if (detectedActions.length >= 3) {
+    detectedActions.forEach((action, index) => {
+      subTasks.push({
+        id: `subtask-${index + 1}`,
+        description: `执行 ${action} 操作`,
+        estimatedTime: 60000,
+        dependencies: [],
+      });
+    });
+  }
+
+  // 检测关键词判断复杂度
+  const complexKeywords = [
+    '多个项目', '3个', '三个', '所有', '批量', '并行', '同时',
+    '完整', '整个', '全部', '递归', '嵌套', '循环',
+  ];
+
+  const simpleKeywords = [
+    '回复', '说', '显示', '列出', '查看', '简单', '快速',
+  ];
+
+  let complexityScore = detectedActions.length;
+  for (const kw of complexKeywords) {
+    if (fullText.includes(kw)) complexityScore += 2;
+  }
+  for (const kw of simpleKeywords) {
+    if (fullText.includes(kw)) complexityScore -= 1;
+  }
+
+  // 判断复杂度级别
+  let level: 'simple' | 'moderate' | 'complex';
+  let estimatedTotalTime: number;
+
+  if (subTasks.length >= 3 || complexityScore >= 4) {
+    level = 'complex';
+    estimatedTotalTime = 300000; // 5分钟+
+  } else if (subTasks.length >= 2 || complexityScore >= 2) {
+    level = 'moderate';
+    estimatedTotalTime = 120000; // 2分钟
+  } else {
+    level = 'simple';
+    estimatedTotalTime = 60000; // 1分钟
+  }
+
+  // 判断是否可并行化
+  const canParallelize = subTasks.length > 1 &&
+    subTasks.every(st => st.dependencies.length === 0);
+
+  return {
+    level,
+    estimatedTotalTime: Math.max(estimatedTotalTime, subTasks.reduce((sum, st) => sum + st.estimatedTime, 0)),
+    subTasks,
+    canParallelize,
+  };
+}
+
 /**
  * 获取任务类型的中文描述
  */

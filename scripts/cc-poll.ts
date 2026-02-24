@@ -32,7 +32,7 @@ import {
   recordTaskResult,
   buildMemoryContext,
 } from './agents.config';
-import { analyzeTask, getTaskTypeDescription, TaskType } from './task-analyzer';
+import { analyzeTask, getTaskTypeDescription, TaskType, analyzeComplexity, TaskComplexity } from './task-analyzer';
 
 // ==================== 配置 ====================
 const CONFIG = {
@@ -71,6 +71,8 @@ interface Task {
   targetAgents: string[];
   taskType?: TaskType;  // 任务类型（动态分配时使用）
   isDynamicAssignment?: boolean;  // 是否为动态分配
+  complexity?: TaskComplexity;  // 任务复杂度分析
+  subTaskIndex?: number;  // 子任务索引（如果是子任务）
 }
 
 // ==================== API 调用 ====================
@@ -140,6 +142,38 @@ async function findPendingTasks(posts: Post[]): Promise<Task[]> {
     // 获取帖子详情检查回复
     const detail = await fetchPostDetail(CONFIG.defaultProjectId, post.id);
     const replies = detail?.replies || [];
+
+    // ========== 新增：检查回复中的 @cc ==========
+    // 检查是否有回复包含 @cc 但还没有被处理
+    for (const reply of replies) {
+      if (/@cc\b/i.test(reply.content) && !reply.content.includes('[CC-DONE]')) {
+        // 找到需要处理的回复
+        const replyMentions = parseMentions(reply.content);
+        const hasReplyTrigger = /@cc\b/i.test(reply.content);
+
+        if (replyMentions.length > 0 || hasReplyTrigger) {
+          // 检查这个回复是否已被处理
+          const replyProcessed = replies.some(r =>
+            r.id !== reply.id &&
+            r.author.id?.startsWith('cc-') &&
+            r.content.includes('[CC-DONE]') &&
+            r.content.includes(`回复 ${reply.id}`)
+          );
+
+          if (!replyProcessed) {
+            const replyInstruction = extractInstruction(reply.content, ['@cc', '@CC', '@Cc']);
+            tasks.push({
+              postId: post.id,
+              title: `回复任务: ${reply.content.substring(0, 30)}...`,
+              content: replyInstruction || reply.content,
+              author: reply.author.name,
+              targetAgents: ['CC1'],
+              isDynamicAssignment: false,
+            });
+          }
+        }
+      }
+    }
 
     // 情况 1: 明确指定了 Agent (@CC1, @CC2 等)
     if (mentions.length > 0) {
@@ -314,6 +348,77 @@ async function pollOnce(): Promise<void> {
         continue;
       }
 
+      // ========== 新增：分析任务复杂度 ==========
+      const complexity = analyzeComplexity(task.title, task.content);
+      console.log(`   📈 [复杂度] ${complexity.level} (预估 ${Math.round(complexity.estimatedTotalTime / 1000)}s)`);
+
+      // 判断是否需要拆分任务
+      const needSplit = complexity.level === 'complex' &&
+                        complexity.subTasks.length > 1 &&
+                        (agent.timeout || CONFIG.ccTimeout) < complexity.estimatedTotalTime;
+
+      if (needSplit) {
+        console.log(`   🔀 [任务拆分] 检测到复杂任务，拆分为 ${complexity.subTasks.length} 个子任务`);
+
+        // 回复"已收到"，说明会拆分执行
+        await createReply(
+          CONFIG.defaultProjectId,
+          task.postId,
+          `[CC-RECEIVED]\n\n✅ 复杂任务已收到，将拆分为 ${complexity.subTasks.length} 个子任务并行执行...\n\n_${agent.name} 于 ${new Date().toLocaleString()}_`,
+          agent.id,
+          agent.name
+        );
+        console.log(`   📩 [${agent.name}] 已回复"收到" ${task.postId}`);
+
+        // 并行执行子任务
+        const subResults = await Promise.all(
+          complexity.subTasks.map(async (subTask, index) => {
+            const subAgent = getAllAgents()[index % getAllAgents().length];  // 轮询分配
+            console.log(`   🔹 [子任务 ${index + 1}] ${subTask.description} → ${subAgent.name}`);
+
+            const subResult = await executeWithAgent({
+              ...task,
+              title: `子任务 ${index + 1}: ${subTask.description}`,
+              content: subTask.description,
+              subTaskIndex: index,
+            }, subAgent);
+
+            return { index, description: subTask.description, result: subResult, agent: subAgent };
+          })
+        );
+
+        // 汇总结果
+        let result = `📋 任务已拆分为 ${subResults.length} 个子任务并行执行：\n\n`;
+        for (const sr of subResults) {
+          result += `### 子任务 ${sr.index + 1}: ${sr.description}\n`;
+          result += `执行者: ${sr.agent.name}\n`;
+          result += `结果: ${sr.result.substring(0, 300)}${sr.result.length > 300 ? '...' : ''}\n\n`;
+        }
+
+        // 记录任务结果
+        recordTaskResult(agent.id, task.title, task.content, result, true);
+
+        // 构建回复
+        const reply = `[CC-DONE]
+
+**${agent.name} (${agent.role}) 任务完成** (并行拆分)
+
+${result}
+---
+_${agent.name} 于 ${new Date().toLocaleString()} 执行_`;
+
+        await createReply(
+          CONFIG.defaultProjectId,
+          task.postId,
+          reply,
+          agent.id,
+          agent.name
+        );
+        console.log(`   ✅ [${agent.name}] 已回复帖子 ${task.postId}`);
+        continue;
+      }
+
+      // 普通任务执行
       // 先回复"已收到"
       await createReply(
         CONFIG.defaultProjectId,

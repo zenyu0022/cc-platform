@@ -17,6 +17,10 @@ export default function Home() {
   const [triggerCompose, setTriggerCompose] = useState(false);
   const [triggerReply, setTriggerReply] = useState(false);
 
+  // 移动端侧边栏状态
+  const [showProjectNav, setShowProjectNav] = useState(false);
+  const [showSidePanel, setShowSidePanel] = useState(false);
+
   const handleFileClick = (node: FileNode) => {
     setPreviewFile(node);
   };
@@ -77,58 +81,114 @@ export default function Home() {
 
   return (
     <div className="h-screen flex bg-neutral-50 overflow-hidden">
-      {/* Sidebar */}
-      <ProjectNav
-        projects={projects}
-        currentProjectId={currentProject.id}
-        onSelectProject={(id) => {
-          selectProject(id);
-          setSelectedPost(null);
-          setReferencedFiles([]);
-        }}
-        onCreateProject={createProject}
-      />
-
-      {/* Main */}
-      {selectedPost ? (
-        <PostDetail
-          post={selectedPost}
-          onBack={() => {
-            setSelectedPost(null);
-            setReferencedFiles([]);
+      {/* 移动端遮罩 */}
+      {(showProjectNav || showSidePanel) && (
+        <div
+          className="fixed inset-0 bg-black/30 z-40 md:hidden"
+          onClick={() => {
+            setShowProjectNav(false);
+            setShowSidePanel(false);
           }}
-          referencedFiles={referencedFiles}
-          onClearReferences={() => setReferencedFiles([])}
-          triggerReplyFocus={triggerReply}
-        />
-      ) : (
-        <PostList
-          posts={currentProject.posts}
-          members={currentProject.members}
-          files={currentProject.fileTree}
-          onSelectPost={(post) => {
-            setSelectedPost(post);
-            setReferencedFiles([]);
-          }}
-          referencedFiles={referencedFiles}
-          onClearReferences={() => setReferencedFiles([])}
-          triggerCompose={triggerCompose}
         />
       )}
 
-      {/* Panel */}
-      <SidePanel
-        tree={currentProject.fileTree}
-        timeline={currentProject.timeline}
-        members={currentProject.members}
-        onFileClick={handleFileClick}
-        onFileReference={handleFileReference}
-        onCreateFolder={createFolder}
-        onCreateFile={createFile}
-        onDeleteNode={deleteNode}
-        onRenameNode={renameNode}
-        onMoveNode={moveNode}
-      />
+      {/* Sidebar - 桌面端固定，移动端抽屉 */}
+      <div className={`fixed inset-y-0 left-0 z-50 md:relative md:z-auto transform transition-transform duration-300 ease-in-out ${
+        showProjectNav ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      }`}>
+        <ProjectNav
+          projects={projects}
+          currentProjectId={currentProject.id}
+          onSelectProject={(id) => {
+            selectProject(id);
+            setSelectedPost(null);
+            setReferencedFiles([]);
+            setShowProjectNav(false);
+          }}
+          onCreateProject={createProject}
+          onCloseMobile={() => setShowProjectNav(false)}
+        />
+      </div>
+
+      {/* Main */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* 移动端头部 */}
+        <header className="h-14 px-4 flex items-center justify-between border-b border-neutral-200 bg-white md:hidden">
+          <button
+            onClick={() => setShowProjectNav(true)}
+            className="w-10 h-10 flex items-center justify-center text-neutral-600 hover:bg-neutral-100 rounded-lg"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 12h18M3 6h18M3 18h18" />
+            </svg>
+          </button>
+          <span className="font-medium text-neutral-900">
+            {selectedPost ? selectedPost.title : currentProject.name}
+          </span>
+          <button
+            onClick={() => setShowSidePanel(true)}
+            className="w-10 h-10 flex items-center justify-center text-neutral-600 hover:bg-neutral-100 rounded-lg"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+          </button>
+        </header>
+
+        {/* 主内容区 */}
+        <div className="flex-1 flex overflow-hidden">
+          {selectedPost ? (
+            <PostDetail
+              post={selectedPost}
+              onBack={() => {
+                setSelectedPost(null);
+                setReferencedFiles([]);
+              }}
+              referencedFiles={referencedFiles}
+              onClearReferences={() => setReferencedFiles([])}
+              triggerReplyFocus={triggerReply}
+            />
+          ) : (
+            <PostList
+              posts={currentProject.posts}
+              members={currentProject.members}
+              files={currentProject.fileTree}
+              onSelectPost={(post) => {
+                setSelectedPost(post);
+                setReferencedFiles([]);
+              }}
+              referencedFiles={referencedFiles}
+              onClearReferences={() => setReferencedFiles([])}
+              triggerCompose={triggerCompose}
+            />
+          )}
+
+          {/* Panel - 桌面端固定，移动端抽屉 */}
+          <div className={`fixed inset-y-0 right-0 z-50 md:relative md:z-auto transform transition-transform duration-300 ease-in-out ${
+            showSidePanel ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
+          }`}>
+            <SidePanel
+              tree={currentProject.fileTree}
+              timeline={currentProject.timeline}
+              members={currentProject.members}
+              onFileClick={(node) => {
+                handleFileClick(node);
+                setShowSidePanel(false);
+              }}
+              onFileReference={(node) => {
+                handleFileReference(node);
+                setShowSidePanel(false);
+              }}
+              onCreateFolder={createFolder}
+              onCreateFile={createFile}
+              onDeleteNode={deleteNode}
+              onRenameNode={renameNode}
+              onMoveNode={moveNode}
+              onCloseMobile={() => setShowSidePanel(false)}
+            />
+          </div>
+        </div>
+      </div>
 
       {/* File Preview Modal */}
       <FilePreview

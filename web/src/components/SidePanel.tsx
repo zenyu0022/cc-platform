@@ -16,6 +16,7 @@ interface Props {
   onDeleteNode: (nodeId: string) => void;
   onRenameNode: (nodeId: string, newName: string) => void;
   onMoveNode: (nodeId: string, newParentId: string) => void;
+  onCloseMobile?: () => void;
 }
 
 function formatTime(dateStr: string) {
@@ -61,6 +62,7 @@ export default function SidePanel({
   onDeleteNode,
   onRenameNode,
   onMoveNode,
+  onCloseMobile,
 }: Props) {
   const [filterMember, setFilterMember] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'files' | 'activity'>('files');
@@ -156,24 +158,35 @@ export default function SidePanel({
   };
 
   return (
-    <aside className="w-72 h-full bg-white border-l border-neutral-200 flex flex-col">
+    <aside className="w-72 h-full bg-white border-l border-neutral-200 flex flex-col md:w-72 w-80 max-w-[85vw]">
       {/* Tabs */}
-      <div className="h-12 px-4 flex items-center gap-4 border-b border-neutral-100">
+      <div className="h-12 px-4 flex items-center justify-between border-b border-neutral-100">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setActiveTab('files')}
+            className={`text-sm font-medium transition-colors ${
+              activeTab === 'files' ? 'text-neutral-900' : 'text-neutral-400 hover:text-neutral-600'
+            }`}
+          >
+            文件
+          </button>
+          <button
+            onClick={() => setActiveTab('activity')}
+            className={`text-sm font-medium transition-colors ${
+              activeTab === 'activity' ? 'text-neutral-900' : 'text-neutral-400 hover:text-neutral-600'
+            }`}
+          >
+            动态
+          </button>
+        </div>
+        {/* 移动端关闭按钮 */}
         <button
-          onClick={() => setActiveTab('files')}
-          className={`text-sm font-medium transition-colors ${
-            activeTab === 'files' ? 'text-neutral-900' : 'text-neutral-400 hover:text-neutral-600'
-          }`}
+          onClick={onCloseMobile}
+          className="md:hidden w-8 h-8 flex items-center justify-center text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-lg"
         >
-          文件
-        </button>
-        <button
-          onClick={() => setActiveTab('activity')}
-          className={`text-sm font-medium transition-colors ${
-            activeTab === 'activity' ? 'text-neutral-900' : 'text-neutral-400 hover:text-neutral-600'
-          }`}
-        >
-          动态
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
         </button>
       </div>
 
