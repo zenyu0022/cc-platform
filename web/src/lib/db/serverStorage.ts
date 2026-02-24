@@ -609,9 +609,10 @@ export const serverDb = {
   // ==================== 帖子/回复方法 ====================
 
   // 获取帖子列表
-  async getPosts(projectId: string): Promise<{ id: string; title: string; content: string; author: { id: string; name: string; type: string }; createdAt: string; replyCount: number; isPinned?: boolean }[]> {
+  async getPosts(projectId: string) {
     const project = await this.getProject(projectId);
     if (!project) return [];
+    // 返回完整数据，包括 replies
     return project.posts.map(p => ({
       id: p.id,
       title: p.title,
@@ -620,6 +621,8 @@ export const serverDb = {
       createdAt: p.createdAt,
       replyCount: p.replyCount,
       isPinned: p.isPinned,
+      replies: p.replies || [],
+      attachments: p.attachments,
     }));
   },
 
