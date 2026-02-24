@@ -1,0 +1,45 @@
+#!/bin/bash
+# Claude Code 多实例协作启动脚本
+# 用法: ./claude-agent <id> <name> <role>
+# 示例: ./claude-agent alpha 阿尔法 writer
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+AGENT_ID="${1:-$(uuidgen | cut -d'-' -f1)}"
+AGENT_NAME="${2:-agent-$AGENT_ID}"
+AGENT_ROLE="${3:-worker}"
+
+export CLAUDE_AGENT_ID="$AGENT_ID"
+export CLAUDE_AGENT_NAME="$AGENT_NAME"
+export CLAUDE_AGENT_ROLE="$AGENT_ROLE"
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+echo -e "${CYAN}╔════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║    Collab Platform - Agent 模式        ║${NC}"
+echo -e "${CYAN}╚════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "  ${GREEN}身份 ID:${NC}   $AGENT_ID"
+echo -e "  ${GREEN}名称:${NC}      $AGENT_NAME"
+echo -e "  ${GREEN}角色:${NC}      $AGENT_ROLE"
+echo ""
+echo -e "${YELLOW}MCP 工具:${NC}"
+echo -e "  agent_whoami        - 查看身份"
+echo -e "  agent_register      - 注册身份到平台"
+echo -e "  agent_list          - 列出在线 Agents"
+echo -e "  agent_send_message  - 发送消息"
+echo -e "  agent_get_messages  - 获取消息"
+echo -e "  collab_history      - 查看协作历史"
+echo ""
+echo -e "${BLUE}文件操作会自动记录操作者身份${NC}"
+echo ""
+
+# 启动 Claude Code
+exec claude

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { serverDb } from '@/lib/db/serverStorage';
+import { serverDb } from '@/lib/db/supabaseStorage';
 
 // Agent 身份类型
 interface AgentIdentity {
@@ -73,6 +73,29 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Post not found' }, { status: 404 });
       }
       return NextResponse.json({ post });
+    }
+
+    if (action === 'project') {
+      // 获取完整项目数据（用于前端同步）
+      const project = await serverDb.getProject(projectId);
+      if (!project) {
+        return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+      }
+      const [fileTree, posts, timeline, members] = await Promise.all([
+        serverDb.getFileTree(projectId),
+        serverDb.getPosts(projectId),
+        serverDb.getTimeline(projectId, 50),
+        serverDb.getProjectAgents(projectId),
+      ]);
+      return NextResponse.json({
+        project: {
+          ...project,
+          fileTree,
+          posts,
+          timeline,
+          members: members.map(m => ({ ...m, type: 'agent' })),
+        },
+      });
     }
 
     // 获取文件树

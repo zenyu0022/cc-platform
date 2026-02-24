@@ -2,7 +2,9 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { Project, Post, Reply, Member, FileNode, TimelineEvent, Attachment } from '@/types';
-import { db } from '@/lib/db';
+import { apiClient } from '@/lib/apiClient';
+
+const DEFAULT_PROJECT_ID = 'proj-default';
 
 interface DataContextValue {
   // 状态
@@ -50,12 +52,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const allProjects = await db.getProjects();
-      const currentId = await db.getCurrentProjectId();
-      const current = allProjects.find(p => p.id === currentId) || allProjects[0] || null;
+      // 先加载项目列表
+      const allProjects = await apiClient.getProjects();
 
-      setProjects(allProjects);
-      setCurrentProject(current);
+      if (allProjects && allProjects.length > 0) {
+        setProjects(allProjects);
+        // 加载完整项目数据
+        const current = await apiClient.getFullProject(allProjects[0].id);
+        setCurrentProject(current);
+      } else {
+        // 如果没有项目，创建默认项目
+        setCurrentProject(null);
+      }
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -70,14 +78,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // 选择项目
   const selectProject = useCallback(async (id: string) => {
-    await db.setCurrentProjectId(id);
-    const project = projects.find(p => p.id === id) || null;
-    setCurrentProject(project);
-  }, [projects]);
+    try {
+      const project = await apiClient.getFullProject(id);
+      setCurrentProject(project);
+    } catch (error) {
+      console.error('Failed to select project:', error);
+    }
+  }, []);
 
   // 创建项目
   const createProject = useCallback(async (input: { name: string; description?: string; visibility: 'private' | 'team' | 'public' }) => {
-    const project = await db.createProject(input);
+    // TODO: 实现 API 创建项目
+    const project = {
+      id: `proj-${Date.now()}`,
+      ...input,
+      fileTree: { id: 'root', name: 'root', type: 'folder', children: [] },
+      posts: [],
+      timeline: [],
+      members: [],
+    } as Project;
     setProjects(prev => [...prev, project]);
     return project;
   }, []);
@@ -86,34 +105,27 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const createPost = useCallback(async (input: { title: string; content: string; attachments?: Attachment[]; tags?: string[] }) => {
     if (!currentProject) throw new Error('No project selected');
 
-    const post = await db.createPost({
-      projectId: currentProject.id,
-      title: input.title,
-      content: input.content,
-      authorId: 'u1',
-      attachments: input.attachments,
-      tags: input.tags,
-    });
+    const result = await apiClient.createPost(currentProject.id, input.title, input.content, input.attachments);
 
-    // 更新当前项目的帖子列表
-    setCurrentProject(prev => prev ? { ...prev, posts: [post, ...prev.posts] } : null);
+    // 刷新项目数据
+    await loadData();
 
-    return post;
-  }, [currentProject]);
+    return result.post;
+  }, [currentProject, loadData]);
 
   // 删除帖子
   const deletePost = useCallback(async (postId: string) => {
-    await db.deletePost(postId);
+    if (!currentProject) throw new Error('No project selected');
+
+    await apiClient.deletePost(currentProject.id, postId);
     setCurrentProject(prev => prev ? { ...prev, posts: prev.posts.filter(p => p.id !== postId) } : null);
-  }, []);
+  }, [currentProject]);
 
   // 创建回复
   const createReply = useCallback(async (postId: string, content: string) => {
-    const reply = await db.createReply({
-      postId,
-      content,
-      authorId: 'u1',
-    });
+    if (!currentProject) throw new Error('No project selected');
+
+    const result = await apiClient.createReply(currentProject.id, postId, content);
 
     // 更新帖子的回复
     setCurrentProject(prev => {
@@ -124,7 +136,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           if (p.id === postId) {
             return {
               ...p,
-              replies: [...p.replies, reply],
+              replies: [...p.replies, result.reply],
               replyCount: p.replyCount + 1,
             };
           }
@@ -133,103 +145,68 @@ export function DataProvider({ children }: { children: ReactNode }) {
       };
     });
 
-    return reply;
-  }, []);
+    return result.reply;
+  }, [currentProject]);
 
   // 文件操作
   const createFolder = useCallback(async (parentId: string, name: string) => {
     if (!currentProject) throw new Error('No project selected');
-    await db.createFolder(currentProject.id, parentId, name);
+    await apiClient.createFolder(currentProject.id, parentId, name);
 
     // 重新加载文件树
-    const tree = await db.getFileTree(currentProject.id);
+    const tree = await apiClient.getFileTree(currentProject.id);
     setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree } : null);
   }, [currentProject]);
 
   const createFile = useCallback(async (parentId: string, name: string, content: string = '') => {
     if (!currentProject) throw new Error('No project selected');
-    await db.createFile(currentProject.id, parentId, name, content);
+    await apiClient.createFile(currentProject.id, parentId, name, content);
 
     // 重新加载文件树和时间线
     const [tree, timeline] = await Promise.all([
-      db.getFileTree(currentProject.id),
-      db.getTimeline(currentProject.id),
+      apiClient.getFileTree(currentProject.id),
+      apiClient.getTimeline(currentProject.id),
     ]);
     setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree, timeline } : null);
   }, [currentProject]);
 
   const updateFileContent = useCallback(async (fileId: string, content: string) => {
     if (!currentProject) throw new Error('No project selected');
-    await db.updateFileContent(currentProject.id, fileId, content);
+    await apiClient.updateFileContent(currentProject.id, fileId, content);
 
     // 重新加载文件树和时间线
     const [tree, timeline] = await Promise.all([
-      db.getFileTree(currentProject.id),
-      db.getTimeline(currentProject.id),
+      apiClient.getFileTree(currentProject.id),
+      apiClient.getTimeline(currentProject.id),
     ]);
     setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree, timeline } : null);
   }, [currentProject]);
 
   const deleteNode = useCallback(async (nodeId: string) => {
     if (!currentProject) throw new Error('No project selected');
-    await db.deleteNode(currentProject.id, nodeId);
+    await apiClient.deleteNode(currentProject.id, nodeId);
 
     // 重新加载文件树
-    const tree = await db.getFileTree(currentProject.id);
+    const tree = await apiClient.getFileTree(currentProject.id);
     setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree } : null);
   }, [currentProject]);
 
   const renameNode = useCallback(async (nodeId: string, newName: string) => {
     if (!currentProject) throw new Error('No project selected');
-    await db.renameNode(currentProject.id, nodeId, newName);
+    await apiClient.renameNode(currentProject.id, nodeId, newName);
 
     // 重新加载文件树
-    const tree = await db.getFileTree(currentProject.id);
+    const tree = await apiClient.getFileTree(currentProject.id);
     setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree } : null);
   }, [currentProject]);
 
   const moveNode = useCallback(async (nodeId: string, newParentId: string) => {
     if (!currentProject) throw new Error('No project selected');
-    // 移动节点的逻辑：先删除再添加到新位置
-    // 这里简化处理，实际需要更复杂的树操作
-    const tree = await db.getFileTree(currentProject.id);
-    if (!tree) return;
+    await apiClient.moveNode(currentProject.id, nodeId, newParentId);
 
-    // 深拷贝并移动节点
-    const findAndRemove = (node: FileNode, id: string): FileNode | null => {
-      if (!node.children) return null;
-      const index = node.children.findIndex(c => c.id === id);
-      if (index !== -1) {
-        const [removed] = node.children.splice(index, 1);
-        return removed;
-      }
-      for (const child of node.children) {
-        const found = findAndRemove(child, id);
-        if (found) return found;
-      }
-      return null;
-    };
-
-    const addToParent = (node: FileNode, id: string, child: FileNode): boolean => {
-      if (node.id === id && node.type === 'folder') {
-        node.children = node.children || [];
-        node.children.push(child);
-        return true;
-      }
-      if (node.children) {
-        for (const c of node.children) {
-          if (addToParent(c, id, child)) return true;
-        }
-      }
-      return false;
-    };
-
-    const movedNode = findAndRemove(tree, nodeId);
-    if (movedNode) {
-      addToParent(tree, newParentId, movedNode);
-      await db.updateFileTree(currentProject.id, tree);
-      setCurrentProject(prev => prev ? { ...prev, fileTree: tree } : null);
-    }
+    // 重新加载文件树
+    const tree = await apiClient.getFileTree(currentProject.id);
+    setCurrentProject(prev => prev ? { ...prev, fileTree: tree || prev.fileTree } : null);
   }, [currentProject]);
 
   const value: DataContextValue = {
