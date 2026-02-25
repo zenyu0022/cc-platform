@@ -95,7 +95,7 @@ ${COMMON_RULES}
 - 需要文档更新 → @CC3
 `,
     workingDir: process.env.WORK_DIR,
-    timeout: 300000,  // 5分钟，适合复杂任务
+    timeout: 900000,  // 15分钟，开发任务通常较复杂
   },
 
   CC2: {
@@ -143,7 +143,7 @@ ${COMMON_RULES}
 - 需要更新文档 → @CC3
 `,
     workingDir: process.env.WORK_DIR,
-    timeout: 30000,
+    timeout: 900000,  // 15分钟，代码审查需要足够时间
   },
 
   CC3: {
@@ -187,7 +187,7 @@ ${COMMON_RULES}
 - 需要代码审查 → @CC2
 `,
     workingDir: process.env.WORK_DIR,
-    timeout: 60000,
+    timeout: 900000,  // 15分钟，文档编写需要足够时间
   },
 };
 
@@ -263,7 +263,9 @@ const TASK_TO_ROLE: Record<string, { role: string; keywords: string[] }> = {
   general: { role: 'assistant', keywords: ['assistant', 'helper', '通用'] },
 };
 
-// 动态 Agent 模板
+// 动态 Agent 模板 - 所有超时统一设为 15 分钟
+const DEFAULT_AGENT_TIMEOUT = 900000;  // 15分钟
+
 const DYNAMIC_TEMPLATES: Record<string, { description: string; promptAddition: string; timeout: number }> = {
   code: {
     description: '代码开发专家 - 专注代码编写、调试和优化',
@@ -274,7 +276,7 @@ const DYNAMIC_TEMPLATES: Record<string, { description: string; promptAddition: s
 - 遵循最佳实践和设计模式
 - 确保代码可测试、可维护
 `,
-    timeout: 120000,
+    timeout: DEFAULT_AGENT_TIMEOUT,
   },
   review: {
     description: '代码审查专家 - 专注代码质量和安全检查',
@@ -285,7 +287,7 @@ const DYNAMIC_TEMPLATES: Record<string, { description: string; promptAddition: s
 - 识别潜在的安全风险和性能问题
 - 提供具体的改进建议
 `,
-    timeout: 60000,
+    timeout: DEFAULT_AGENT_TIMEOUT,
   },
   docs: {
     description: '文档编写专家 - 专注技术文档和注释',
@@ -296,7 +298,7 @@ const DYNAMIC_TEMPLATES: Record<string, { description: string; promptAddition: s
 - 提供完整可运行的代码示例
 - 确保文档与代码同步更新
 `,
-    timeout: 60000,
+    timeout: DEFAULT_AGENT_TIMEOUT,
   },
   research: {
     description: '调研分析专家 - 专注技术调研和方案评估',
@@ -307,7 +309,7 @@ const DYNAMIC_TEMPLATES: Record<string, { description: string; promptAddition: s
 - 提供客观的数据和对比
 - 给出可操作的建议
 `,
-    timeout: 90000,
+    timeout: DEFAULT_AGENT_TIMEOUT,
   },
   testing: {
     description: '测试工程师 - 专注测试用例设计和验证',
@@ -318,7 +320,7 @@ const DYNAMIC_TEMPLATES: Record<string, { description: string; promptAddition: s
 - 覆盖边界条件和异常场景
 - 确保测试可重复执行
 `,
-    timeout: 90000,
+    timeout: DEFAULT_AGENT_TIMEOUT,
   },
   general: {
     description: '通用助手 - 处理各类通用任务',
@@ -328,7 +330,7 @@ const DYNAMIC_TEMPLATES: Record<string, { description: string; promptAddition: s
 - 快速响应，直接执行
 - 保持简洁明了
 `,
-    timeout: 30000,
+    timeout: DEFAULT_AGENT_TIMEOUT,
   },
 };
 

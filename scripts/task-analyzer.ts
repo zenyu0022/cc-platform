@@ -9,6 +9,48 @@ export interface TaskType {
   keywords: string[];
 }
 
+// 无效任务模式（自动回复、确认消息等）
+const INVALID_TASK_PATTERNS: RegExp[] = [
+  // ===== Agent 自动确认回复 =====
+  /收到.*任务.*我是\s*CC\d/i,              // "收到任务！我是 CC2"
+  /我是\s*CC\d.*开始处理/i,                // "我是 CC2，开始处理"
+  /我是\s*CC\d.*处理.*任务/i,              // "我是 CC2，处理调试任务"
+  /我是\s*CC\d.*,.*开始/i,                 // "我是 CC2，开始..."
+
+  // ===== 从回复提取的 Agent 消息 =====
+  /^回复任务:.*收到.*我是\s*CC\d/im,       // "回复任务: 收到...我是 CC2"
+  /^回复任务:.*我是\s*CC\d.*开始/im,       // "回复任务: ...我是 CC2，开始"
+  /^回复任务:.*我是\s*CC\d/im,             // "回复任务: ...我是 CC2"
+
+  // ===== 简化匹配 =====
+  /CC\d.*开始处理/i,                       // "CC2 开始处理"
+  /CC\d.*处理调试任务/i,                   // "CC2 处理调试任务"
+  /开始处理调试任务/i,                      // 只有"开始处理调试任务"
+  /开始处理.*任务$/i,                       // 只有"开始处理任务"
+
+  // ===== 关键组合模式 =====
+  /收到.*@CC.*我是\s*CC\d/i,               // "收到 @CC 的任务！我是 CC2"
+  /收到.*的?任务.*我是\s*CC\d/i,           // "收到任务...我是 CCx"
+
+  // ===== 新增：纯确认消息 =====
+  /^回复任务:\s*收到.*任务.*我是\s*CC\d.*开始处理/im,  // 完整格式
+
+  // ===== 截断标题匹配（标题被截断为 "..." 时）=====
+  /^回复任务:.*收到.*CC\d.*\.\.\./im,      // "回复任务: 收到...CC2..."
+  /^回复任务:.*我是\s*CC\d.*\.\.\./im,     // "回复任务: ...我是 CC2..."
+  /收到.*@CC.*我是\s*CC\d.*开始处理调试/im,  // "收到 @CC 的任务！我是 CC2，开始处理调试"
+
+  // ===== 新增：更宽松的匹配 =====
+  /我是\s*CC\d/i,                          // 任何包含 "我是 CCx" 的消息
+  /CC\d.*任务.*收到/i,                     // "CC2 任务 收到"
+  /收到.*CC\d/i,                           // "收到 CC2"
+
+  // ===== 回复任务前缀 + Agent 确认（最高优先级）=====
+  /^回复任务:.*CC\d/im,                    // 任何 "回复任务: ...CCx..." 格式
+  /^回复任务:.*开始处理/im,                // 任何 "回复任务: ...开始处理..." 格式
+  /^回复任务:.*收到/im,                    // 任何 "回复任务: ...收到..." 格式
+];
+
 // 关键词 -> 任务类型映射
 const TASK_PATTERNS: Array<{
   pattern: RegExp;
@@ -72,6 +114,19 @@ const TASK_PATTERNS: Array<{
 ];
 
 /**
+ * 检查是否为无效任务（自动回复、确认消息等）
+ */
+export function isInvalidTask(title: string, content: string): boolean {
+  const fullText = `${title} ${content}`;
+  for (const pattern of INVALID_TASK_PATTERNS) {
+    if (pattern.test(fullText)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * 分析任务内容，返回任务类型
  */
 export function analyzeTask(title: string, content: string): TaskType {
@@ -131,25 +186,28 @@ export function analyzeComplexity(title: string, content: string): TaskComplexit
   const fullText = `${title} ${content}`;
   const subTasks: SubTask[] = [];
 
-  // 检测编号步骤的模式 (1. xxx, 2. xxx, 一、xxx)
-  const numberedStepPattern = /(?:^|\n)\s*(\d+[\.、)]\s*.+?)(?=(?:\n\s*\d+[\.、)])|$)/g;
+  // 检测编号步骤的模式 - 支持同一行和换行格式
+  // 匹配 "1. xxx", "2、xxx", "3) xxx" 等，遇到下一个编号或换行结束
+  const numberedStepPattern = /(\d+[\.、)]\s*[^\d\n]+?)(?=\s*\d+[\.、)]|$)/g;
   // 检测中文章节模式 (一、二、三)
-  const chineseStepPattern = /(?:^|\n)\s*([一二三四五六七八九十]+[、.]\s*.+?)(?=(?:\n\s*[一二三四五六七八九十]+[、.])|$)/g;
+  const chineseStepPattern = /([一二三四五六七八九十]+[、.]\s*[^一二三四五六七八九十\n]+?)(?=\s*[一二三四五六七八九十]+[、.]|$)/g;
 
   // 提取编号步骤
   const numberedSteps: string[] = [];
   let match;
   while ((match = numberedStepPattern.exec(fullText)) !== null) {
-    if (match[1] && match[1].trim().length > 3) {
-      numberedSteps.push(match[1].trim());
+    const step = match[1].trim();
+    if (step.length > 3 && step.length < 100) {
+      numberedSteps.push(step);
     }
   }
 
   // 如果没有编号步骤，检查中文步骤
   if (numberedSteps.length === 0) {
     while ((match = chineseStepPattern.exec(fullText)) !== null) {
-      if (match[1] && match[1].trim().length > 3) {
-        numberedSteps.push(match[1].trim());
+      const step = match[1].trim();
+      if (step.length > 3 && step.length < 100) {
+        numberedSteps.push(step);
       }
     }
   }

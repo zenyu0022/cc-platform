@@ -32,14 +32,29 @@ import {
   recordTaskResult,
   buildMemoryContext,
 } from './agents.config';
-import { analyzeTask, getTaskTypeDescription, TaskType, analyzeComplexity, TaskComplexity } from './task-analyzer';
+import { analyzeTask, getTaskTypeDescription, TaskType, analyzeComplexity, TaskComplexity, isInvalidTask } from './task-analyzer';
+import {
+  createTask,
+  getTask,
+  getTasksByPost,
+  getActiveTasks,
+  updateTask,
+  executeInBackground,
+  executeInPhases,
+  loadTasks,
+  saveTasks,
+  cleanupOldTasks,
+  getTaskSummary,
+  BackgroundTask,
+  PhaseInfo,
+} from './task-manager';
 
 // ==================== 配置 ====================
 const CONFIG = {
   apiUrl: process.env.COLLAB_API_URL || 'http://localhost:3000/api/files',
   defaultProjectId: process.env.DEFAULT_PROJECT_ID || 'proj-default',
   pollInterval: parseInt(process.env.POLL_INTERVAL || '60000'),
-  ccTimeout: parseInt(process.env.CC_TIMEOUT || '120000'),
+  ccTimeout: parseInt(process.env.CC_TIMEOUT || '900000'),  // 默认15分钟
   executor: process.env.EXECUTOR || 'claude',
   // 默认 Agent（当没有明确提及时）
   defaultAgent: process.env.DEFAULT_AGENT || 'CC1',
@@ -79,14 +94,14 @@ interface Task {
 async function fetchPosts(projectId: string): Promise<Post[]> {
   const url = `${CONFIG.apiUrl}?action=posts&projectId=${projectId}`;
   const res = await fetch(url);
-  const data = await res.json();
+  const data = await res.json() as { posts?: Post[] };
   return data.posts || [];
 }
 
 async function fetchPostDetail(projectId: string, postId: string): Promise<Post | null> {
   const url = `${CONFIG.apiUrl}?action=post&projectId=${projectId}&postId=${postId}`;
   const res = await fetch(url);
-  const data = await res.json();
+  const data = await res.json() as { post?: Post };
   return data.post || null;
 }
 
@@ -111,8 +126,26 @@ async function createReply(projectId: string, postId: string, content: string, a
 function isProcessedByAgent(replies: Reply[] | undefined, agentId: string): boolean {
   if (!replies || replies.length === 0) return false;
   return replies.some(r =>
-    r.author.id === agentId && r.content.includes('[CC-DONE]')
+    r.author.id === agentId && r.content.includes('[CC-DONE]') && !r.content.includes('❌')
   );
+}
+
+// 检查帖子是否已被任何 Agent 成功处理过
+function isProcessedByAnyAgent(replies: Reply[] | undefined): boolean {
+  if (!replies || replies.length === 0) return false;
+  return replies.some(r =>
+    r.author.type === 'agent' &&
+    r.content.includes('[CC-DONE]') &&
+    !r.content.includes('❌ 任务执行超时') &&
+    !r.content.includes('❌ 执行失败') &&
+    !r.content.includes('任务超时报告')
+  );
+}
+
+// 检查帖子是否有正在执行的后台任务
+function hasActiveBackgroundTask(postId: string): boolean {
+  const tasks = getTasksByPost(postId);
+  return tasks.some(t => t.status === 'running' || t.status === 'pending');
 }
 
 function extractInstruction(content: string, agentKeywords: string[]): string {
@@ -129,6 +162,12 @@ async function findPendingTasks(posts: Post[]): Promise<Task[]> {
   const tasks: Task[] = [];
 
   for (const post of posts) {
+    // ========== 新增：检查是否有活跃的后台任务 ==========
+    if (hasActiveBackgroundTask(post.id)) {
+      console.log(`   ⏳ [后台任务] "${post.title}" 正在后台执行中，跳过`);
+      continue;
+    }
+
     const fullText = `${post.title} ${post.content}`;
     const mentions = parseMentions(fullText);
 
@@ -144,28 +183,50 @@ async function findPendingTasks(posts: Post[]): Promise<Task[]> {
     const replies = detail?.replies || [];
 
     // ========== 新增：检查回复中的 @cc ==========
-    // 检查是否有回复包含 @cc 但还没有被处理
+    // 检查帖子是否已被任何 Agent 处理过（有 [CC-DONE] 或 [CC-RECEIVED] 标记）
+    const hasAgentResponse = replies.some(r =>
+      r.author.type === 'agent' && (r.content.includes('[CC-DONE]') || r.content.includes('[CC-RECEIVED]'))
+    );
+
+    // 始终检查回复，但跳过 Agent 回复
     for (const reply of replies) {
-      if (/@cc\b/i.test(reply.content) && !reply.content.includes('[CC-DONE]')) {
-        // 找到需要处理的回复
+      // 跳过 Agent 回复（Agent 回复不应触发新任务）
+      // 检查方式：1. type 是 agent，或 2. 作者名以 CC 开头（如 CC1, CC2）
+      if (reply.author.type === 'agent' || /^CC\d+$/i.test(reply.author.name)) {
+        continue;
+      }
+
+      // 如果帖子已被 Agent 响应，跳过所有人类回复（防止重复处理）
+      if (hasAgentResponse) {
+        continue;
+      }
+
+      // 跳过已标记为处理的回复
+      if (reply.content.includes('[CC-DONE]') || reply.content.includes('[CC-RECEIVED]')) {
+        continue;
+      }
+
+      if (/@cc\b/i.test(reply.content)) {
         const replyMentions = parseMentions(reply.content);
         const hasReplyTrigger = /@cc\b/i.test(reply.content);
 
         if (replyMentions.length > 0 || hasReplyTrigger) {
-          // 检查这个回复是否已被处理
-          const replyProcessed = replies.some(r =>
-            r.id !== reply.id &&
-            r.author.id?.startsWith('cc-') &&
-            r.content.includes('[CC-DONE]') &&
-            r.content.includes(`回复 ${reply.id}`)
-          );
+          const replyInstruction = extractInstruction(reply.content, ['@cc', '@CC', '@Cc']);
+          const taskTitle = `回复任务: ${reply.content.substring(0, 30)}...`;
 
-          if (!replyProcessed) {
-            const replyInstruction = extractInstruction(reply.content, ['@cc', '@CC', '@Cc']);
+          // 只有当提取后的指令非空且有意义时才创建任务
+          if (replyInstruction && replyInstruction.length > 5) {
+            // 检查是否为无效任务（自动回复、确认消息等）
+            // 同时检查原始回复内容和提取后的指令
+            if (isInvalidTask(taskTitle, replyInstruction) || isInvalidTask(taskTitle, reply.content)) {
+              console.log(`   ⏭️ 跳过无效任务: ${taskTitle}`);
+              continue;
+            }
+
             tasks.push({
               postId: post.id,
-              title: `回复任务: ${reply.content.substring(0, 30)}...`,
-              content: replyInstruction || reply.content,
+              title: taskTitle,
+              content: replyInstruction,
               author: reply.author.name,
               targetAgents: ['CC1'],
               isDynamicAssignment: false,
@@ -185,6 +246,12 @@ async function findPendingTasks(posts: Post[]): Promise<Task[]> {
           const allKeywords = [...agent.triggerKeywords, '@cc', '@CC'];
           const instruction = extractInstruction(post.content, allKeywords);
 
+          // 检查是否为无效任务
+          if (isInvalidTask(post.title, instruction || post.content)) {
+            console.log(`   ⏭️ 跳过无效任务: ${post.title}`);
+            continue;
+          }
+
           tasks.push({
             postId: post.id,
             title: post.title,
@@ -201,6 +268,12 @@ async function findPendingTasks(posts: Post[]): Promise<Task[]> {
       // 提取指令内容
       const instruction = extractInstruction(post.content, ['@cc', '@CC', '@Cc']);
 
+      // 检查是否为无效任务
+      if (isInvalidTask(post.title, instruction || post.content)) {
+        console.log(`   ⏭️ 跳过无效任务: ${post.title}`);
+        continue;
+      }
+
       // 分析任务类型
       const taskType = analyzeTask(post.title, instruction);
       console.log(`   📊 [任务分析] "${post.title}" → ${taskType.category} (置信度: ${taskType.confidence})`);
@@ -213,10 +286,19 @@ async function findPendingTasks(posts: Post[]): Promise<Task[]> {
         // 没有匹配的 Agent，动态创建
         agent = createDynamicAgent(taskType, post.title);
         isDynamic = true;
+      } else if (agent.isDynamic) {
+        // 找到了已存在的动态 Agent
+        isDynamic = true;
       }
 
       // 检查是否已处理
-      if (!isProcessedByAgent(replies, agent.id)) {
+      // 对于动态 Agent，始终检查是否有任何 Agent 处理过（因为 ID 每次不同）
+      // 对于静态 Agent，检查特定 Agent 是否处理过
+      const alreadyProcessed = isDynamic
+        ? isProcessedByAnyAgent(replies)
+        : isProcessedByAgent(replies, agent.id);
+
+      if (!alreadyProcessed) {
         tasks.push({
           postId: post.id,
           title: post.title,
@@ -287,9 +369,36 @@ async function executeWithAgent(task: Task, agent: AgentConfig): Promise<string>
       child.stdout.on('data', (data) => { stdout += data; });
       child.stderr.on('data', (data) => { stderr += data; });
 
+      // 超时处理：不杀死进程，而是收集进度信息并返回报告
       const timeout = setTimeout(() => {
-        child.kill();
-        reject(new Error('TIMEOUT'));
+        const elapsed = Date.now() - startTime;
+        const timeoutMs = agent.timeout || CONFIG.ccTimeout;
+
+        // 构建超时报告，包含已收集的输出
+        let progressReport = `⏰ **任务超时报告**
+
+**超时时间**: ${timeoutMs / 1000}s
+**已执行时间**: ${Math.round(elapsed / 1000)}s
+
+**已收集的输出** (${stdout.length} 字符):
+\`\`\`
+${stdout.slice(-2000) || '（暂无输出）'}
+\`\`\`
+
+**可能原因**:
+- 任务复杂度超出预期
+- 外部依赖响应慢
+- 需要更多时间完成
+
+**建议**: 增加超时时间或拆分任务`;
+
+        if (stderr) {
+          progressReport += `\n\n**错误输出**:\n\`\`\`\n${stderr.slice(-500)}\n\`\`\``;
+        }
+
+        // 不杀死进程，让它继续执行（但返回超时报告）
+        // child.kill();  // 移除：不杀死进程
+        resolve(progressReport);
       }, agent.timeout || CONFIG.ccTimeout);
 
       child.on('close', (code) => {
@@ -314,9 +423,6 @@ async function executeWithAgent(task: Task, agent: AgentConfig): Promise<string>
 
     return result;
   } catch (error: any) {
-    if (error.message === 'TIMEOUT') {
-      return '❌ 任务执行超时';
-    }
     return `❌ 执行失败: ${error.message}`;
   }
 }
@@ -479,6 +585,17 @@ async function startPolling(): Promise<void> {
   // 加载持久化的动态 Agent
   console.log('\n📂 加载 Agent 记忆...');
   loadDynamicAgents();
+
+  // 加载后台任务状态
+  console.log('\n📂 加载后台任务...');
+  loadTasks();
+  cleanupOldTasks();  // 清理过期任务
+
+  // 显示活跃的后台任务
+  const activeTasks = getActiveTasks();
+  if (activeTasks.length > 0) {
+    console.log(`   🔄 有 ${activeTasks.length} 个后台任务正在执行或待执行`);
+  }
 
   console.log(`   API: ${CONFIG.apiUrl}`);
   console.log(`   项目: ${CONFIG.defaultProjectId}`);
